@@ -32,19 +32,24 @@ class ExecutionLogger:
         """)
         self.conn.commit()
 
-    def log_execution(self, user_command, parsed_plan, final_response, status):
+    def log_execution(self, user_command, intent, domain, action, risk, status, response):
         """Record a single execution to the database.
+
+        UNIFIED SIGNATURE - All parameters explicit for controller contract.
 
         Args:
             user_command: Original user input string.
-            parsed_plan: Structured plan dict from controller.
-            final_response: The response string shown to user.
-            status: 'success', 'error', or 'planned'.
+            intent: Intent classification (e.g., 'task', 'memory', 'unknown').
+            domain: Domain classification (e.g., 'calendar', 'notion', 'system').
+            action: Specific action taken (e.g., 'read_today', 'store_entry').
+            risk: Risk level ('low', 'medium', 'high').
+            status: Execution status ('success', 'error', 'planned').
+            response: The response string shown to user.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Truncate response for storage (keep first 500 chars)
-        summary = final_response[:500] if final_response else ""
+        summary = response[:500] if response else ""
 
         cursor = self.conn.cursor()
         cursor.execute("""
@@ -54,10 +59,10 @@ class ExecutionLogger:
         """, (
             timestamp,
             user_command,
-            parsed_plan.get("intent", "unknown"),
-            parsed_plan.get("domain", "unknown"),
-            parsed_plan.get("action", "none"),
-            parsed_plan.get("risk", "unknown"),
+            intent,
+            domain,
+            action,
+            risk,
             status,
             summary
         ))
@@ -79,6 +84,23 @@ class ExecutionLogger:
             LIMIT ?
         """, (limit,))
         return cursor.fetchall()
+
+    def log_error(self, user_command, error_message):
+        """Log a system error.
+        
+        Args:
+            user_command: Original user input string.
+            error_message: Error description.
+        """
+        self.log_execution(
+            user_command=user_command,
+            intent="error",
+            domain="system",
+            action="error",
+            risk="high",
+            status="error",
+            response=error_message
+        )
 
     def close(self):
         """Close database connection."""

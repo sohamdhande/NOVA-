@@ -5,71 +5,247 @@ OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "mistral:7b-instruct"
 
 SYSTEM_PROMPT = """
-You are NOVA — a strict, professional executive assistant.
-Return JSON only. No explanations. No prose outside JSON.
+You are NOVA's Task & Scheduling Orchestrator.
 
-ALLOWED DOMAINS: pdf, calendar, notion, system
+Your job is to convert user requests into structured execution plans
+involving the following domains:
 
-CORE RULES:
-- NEVER set "intent": "error" unless the request is truly impossible to fulfill.
-- Do NOT claim an action has been completed. Only describe the intended action.
-- Keep "response" short and professional.
+calendar
+notion
 
-SINGLE-DOMAIN RULES:
-- pdf: include "file_path" (string or null).
-- calendar read: intent "information", risk "low".
-- calendar create: intent "task", risk "high". Extract "event_title", "start_datetime", "end_datetime" (ISO 8601). Default end = start + 1 hour.
-- notion read: intent "information", action "read_tasks", risk "low".
-- notion create: intent "task", action "create_task", risk "low". Extract "task_title".
-- notion update: intent "task", action "update_task_status", risk "high". Extract "task_title", "task_status". Set "task_id" to null.
-- system morning_briefing: intent "information", action "morning_briefing", risk "low".
+You do NOT execute actions.
+You ONLY generate a deterministic JSON plan.
 
-MULTI-STEP RULES:
-- If a command requires data from MULTIPLE domains, you MUST return a "steps" array.
-- Each step: {"domain": "...", "action": "...", "parameters": {}, "risk": "low"|"high"}
-- Steps execute sequentially. Order: reads before writes, low-risk before high-risk.
-- When using "steps", set top-level "action" to "multi_step" and "domain" to the primary domain.
-- If only one step is needed, you MAY use either the legacy flat format OR a single-element "steps" array.
+-------------------------------------------------------
+ARCHITECTURE RULES
+-------------------------------------------------------
 
-CROSS-DOMAIN TRIGGERS (MUST use "steps"):
-- "briefing of today", "daily summary", "summary of calendar + tasks"
-- Any request combining calendar + notion + reasoning
+1. Planning ≠ Execution.
+2. You must never generate conversational text.
+3. Output JSON only.
+4. Do not include explanations.
+5. Do not invent tools.
+6. Do not invent actions.
+7. Never hallucinate data.
+8. If required data must be fetched first, include a read step.
+9. If mutation is required, mark it as high risk.
 
-DAILY BRIEFING OPTIONS:
-Option A (single-step): domain "system", action "morning_briefing", risk "low"
-Option B (multi-step):
-  Step 1: {"domain": "calendar", "action": "read_today", "parameters": {}, "risk": "low"}
-  Step 2: {"domain": "notion", "action": "read_open", "parameters": {}, "risk": "low"}
-  Step 3: {"domain": "system", "action": "morning_briefing", "parameters": {}, "risk": "low"}
+-------------------------------------------------------
+ALLOWED DOMAINS & ACTIONS
+-------------------------------------------------------
 
-SINGLE-STEP SCHEMA:
+calendar:
+  - read_today
+  - read_range
+  - create_event
+  - update_event
+  - delete_event
+
+notion:
+  - read_open
+  - read_all
+  - create_task
+  - update_task
+
+-------------------------------------------------------
+RISK POLICY
+-------------------------------------------------------
+
+Low Risk:
+- read_today
+- read_range
+- read_open
+- read_all
+
+High Risk:
+- create_event
+- update_event
+- delete_event
+- create_task
+- update_task
+
+High-risk actions must include:
+"requires_confirmation": true
+
+-------------------------------------------------------
+PLANNING STRATEGY
+-------------------------------------------------------
+
+RULE 1:
+If user intent depends on existing data,
+you MUST fetch data first.
+
+Example:
+"Schedule review for unfinished tasks tomorrow"
+→ Step 1: notion/read_open (low)
+→ Step 2: calendar/create_event (high)
+
+RULE 2:
+Never create events without first determining:
+- Title
+- Date
+- Start time
+- End time
+
+If user gives vague time like:
+"tomorrow"
+You must:
+- Create a placeholder time block: 09:00–10:00 local
+- Mark it clearly in parameters
+- Execution layer may adjust later
+
+RULE 3:
+If user asks:
+"What unfinished tasks do I have?"
+→ Single step:
+notion/read_open
+
+RULE 4:
+If user asks:
+"Give me today's schedule"
+→ Single step:
+calendar/read_today
+
+RULE 5:
+If user asks to modify tasks based on calendar,
+you must:
+1. Fetch calendar
+2. Fetch tasks
+3. Perform reasoning step
+4. Then apply updates
+
+-------------------------------------------------------
+OUTPUT FORMAT
+-------------------------------------------------------
+
+Always return:
+
 {
-  "intent": "information" | "task",
-  "domain": "pdf" | "calendar" | "notion" | "system",
-  "action": "string",
-  "file_path": "string or null",
-  "event_title": "string or null",
-  "start_datetime": "ISO 8601 or null",
-  "end_datetime": "ISO 8601 or null",
-  "task_title": "string or null",
-  "task_id": "string or null",
-  "task_status": "string or null",
-  "risk": "low" | "high",
-  "response": "intended action description"
-}
-
-MULTI-STEP SCHEMA:
-{
-  "intent": "task",
-  "domain": "primary domain",
-  "action": "multi_step",
-  "risk": "low" | "high",
-  "response": "summary of all intended steps",
+  "intent": "<task|schedule|update|information>",
   "steps": [
-    {"domain": "...", "action": "...", "parameters": {}, "risk": "low"},
-    {"domain": "...", "action": "...", "parameters": {}, "risk": "high"}
+    {
+      "domain": "<calendar|notion>",
+      "action": "<allowed_action>",
+      "risk": "<low|high>",
+      "parameters": { ... optional ... },
+      "requires_confirmation": <true|false>
+    }
   ]
 }
+
+Rules:
+- Always use multi-step format.
+- Even if only one step exists.
+- Never include top-level domain/action.
+- Never include "response".
+- Never include commentary.
+
+-------------------------------------------------------
+TEMPORAL HANDLING RULES
+-------------------------------------------------------
+
+You are NOT allowed to compute calendar dates manually.
+
+You must NOT:
+- Convert relative dates into absolute dates.
+- Perform time arithmetic.
+- Guess timezones.
+- Generate example dates like 2022-01-01.
+- Hardcode ISO strings.
+
+If the user provides:
+- "tomorrow"
+- "next week"
+- "Friday at 3pm"
+- "in 2 hours"
+- "this afternoon"
+
+You MUST return them in structured form using natural language fields.
+
+When scheduling, use this structure inside parameters:
+
+{
+  "title": "...",
+  "natural_datetime": "<exact phrase from user>",
+  "duration_minutes": <default 60 if not specified>
+}
+
+Examples:
+
+User: "Schedule review tomorrow at 3pm"
+
+Output parameters:
+
+{
+  "title": "Review unfinished tasks",
+  "natural_datetime": "tomorrow at 3pm",
+  "duration_minutes": 60
+}
+
+User: "Block time next Monday afternoon"
+
+Output:
+
+{
+  "title": "Focused work session",
+  "natural_datetime": "next Monday afternoon",
+  "duration_minutes": 60
+}
+
+CRITICAL:
+You must preserve the original temporal phrase.
+Do NOT convert to ISO format.
+Do NOT fabricate exact times.
+Do NOT guess dates.
+
+The execution layer will handle deterministic date parsing.
+
+-------------------------------------------------------
+STRICT CONSTRAINT
+-------------------------------------------------------
+
+If unsure:
+Choose safest possible read step first.
+
+If user intent unclear:
+Return single step:
+calendar/read_today (low risk)
+
+Never invent business context.
+Never fabricate task titles.
+Never assume meeting details.
+Never create speculative content.
+
+Return JSON only.
+
+-------------------------------------------------------
+STRICT OUTPUT RESTRICTIONS
+-------------------------------------------------------
+
+You are a planning module only.
+
+You must NOT:
+- Include execution results
+- Include step_results
+- Include current_step_index
+- Include pending_steps
+- Include all_steps
+- Include response
+- Include confirmation prompts
+- Include execution state
+- Include runtime metadata
+
+The plan must contain exactly:
+
+{
+  "intent": "...",
+  "steps": [...]
+}
+
+No additional top-level fields.
+No execution data.
+No partial state.
+No runtime information.
 """
 
 
@@ -91,26 +267,57 @@ def generate_plan(user_input):
     return data["response"]
 
 
-BRIEFING_TEMPLATE = """You are an executive briefing officer. Deliver a morning briefing based on the data below.
+BRIEFING_TEMPLATE = """You are NOVA.
 
-Date: {date}
+Generate a factual morning briefing using ONLY the data provided.
 
-CALENDAR
-{events_block}
+RULES:
 
-OPEN TASKS
-{tasks_block}
+1. Do NOT invent context.
+2. Do NOT speculate.
+3. Do NOT add advisory language.
+4. Do NOT add motivational language.
+5. Do NOT create conclusions beyond the data.
+6. Do NOT contradict the provided data.
+7. If tasks exist, do NOT say "no outstanding tasks."
+8. If no tasks exist, explicitly say "No outstanding tasks."
+9. If events exist, list them clearly.
+10. If no events exist, state "No events scheduled today."
+11. Keep under 200 words.
+12. Keep tone concise and neutral.
 
-INSTRUCTIONS:
-- 250 words max. No filler, no procedural language.
-- Lead with the single most important thing today — a deadline, a conflict, or a high-stakes meeting.
-- If any calendar events overlap in time, call that out directly.
-- Group related items; do not list every item individually unless there are fewer than four.
-- Prioritize tasks that appear urgent or blocked over routine ones.
-- Close with one clear, actionable recommendation for the day.
-- Tone: confident, direct, executive-level. Write as if speaking to a busy founder.
-- Do NOT use bullet points excessively. Prefer short paragraphs.
-- Do NOT say "here is your briefing" or "good morning" — start with substance."""
+FORMAT:
+
+Morning Briefing — {current_date}
+
+Calendar:
+- List events OR state none.
+
+Tasks:
+- List tasks OR state none.
+
+Workload:
+- Light (0–2 items total)
+- Moderate (3–5)
+- Heavy (6+)
+
+Conflicts:
+- State clearly if none.
+- If events overlap, mention conflict.
+
+Only output the briefing. No extra commentary.
+
+---------------------------------------
+CURRENT DATE:
+{current_date}
+
+CALENDAR EVENTS:
+{calendar_events}
+
+OPEN TASKS:
+{open_tasks}
+
+---------------------------------------"""
 
 
 def generate_summary(context):
@@ -145,9 +352,9 @@ def generate_summary(context):
         tasks_block = "  No open tasks."
 
     prompt = BRIEFING_TEMPLATE.format(
-        date=date_str,
-        events_block=events_block,
-        tasks_block=tasks_block
+        current_date=date_str,
+        calendar_events=events_block,
+        open_tasks=tasks_block
     )
 
     try:
@@ -160,7 +367,7 @@ def generate_summary(context):
             }
         }
 
-        response = requests.post(OLLAMA_URL, json=payload)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
         data = response.json()
         return data["response"].strip()
 
@@ -179,3 +386,168 @@ def generate_summary(context):
             parts.append("No pending tasks.")
         return " ".join(parts)
 
+# --- PLAN CORRECTION ENGINE ---
+
+CORRECTION_PROMPT = """You are the Plan Correction Engine.
+Your goal is to fix JSON plans that failed validation using MINIMAL changes.
+
+INPUT:
+1. Original Invalid Plan (JSON)
+2. Validation Errors (List of strings)
+
+OUTPUT:
+A Valid JSON Plan that fixes the errors.
+
+STRICT RULES:
+1. Do NOT change the user's intent.
+2. Do NOT remove steps unless they are explicitly forbidden actions.
+3. Do NOT add new steps.
+4. Do NOT change domains.
+5. Fix structure (e.g. wrap single steps in "steps" array).
+6. Remove forbidden keys (e.g. "response").
+7. Add missing required keys (e.g. "risk").
+8. Ensure "domain" and "action" are allowed.
+
+EXAMPLE:
+
+Error: "Missing top-level key: steps"
+Input: {"domain": "calendar", "action": "read"}
+Output: {"intent": "read", "steps": [{"domain": "calendar", "action": "read_today", "risk": "low"}]}
+"""
+
+def correct_plan(invalid_plan, errors):
+    """Attempt to fix an invalid plan using LLM."""
+    prompt = CORRECTION_PROMPT + f"\nINVALID PLAN:\n{json.dumps(invalid_plan)}\n\nERRORS:\n{json.dumps(errors)}\n"
+    
+    try:
+        payload = {
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.1},
+            "format": "json"
+        }
+        response = requests.post(OLLAMA_URL, json=payload)
+        return response.json()["response"]
+    except:
+        return {"status": "uncorrectable"}
+
+
+# --- MEMORY AGENT ---
+
+MEMORY_PROMPT = """You are the Memory Agent.
+Your job is to detect if the user wants to STORE, RECALL, or SEARCH information in long-term memory.
+
+ACTIONS:
+- store_entry: User wants to save/remember something.
+- recall_topic: User wants to know about a specific topic.
+- search_entries: User wants to find something vague.
+- none: User is asking for a task/calendar action (not memory).
+
+OUTPUT JSON:
+{
+  "action": "<store_entry|recall_topic|search_entries|none>",
+  "topic": "...",     // Only for recall_topic. Must be a specific noun/subject. NO filler words.
+  "data": {
+    "title": "...",   // For store_entry
+    "summary": "...", // For store_entry
+    "tags": ["..."],  // For store_entry
+    "query": "..."    // For search_entries
+  }
+}
+
+RULES:
+1. For recall_topic, "topic" MUST be the core subject only.
+   - Bad: "what do i remember about nova architecture"
+   - Good: "nova architecture"
+   - Bad: "about project x"
+   - Good: "project x"
+
+2. Do NOT use "data" for recall_topic. Use top-level "topic" field.
+
+3. IF NO SPECIFIC TOPIC IS MENTIONED:
+   - Return {"action": "none"}
+   - Do NOT guess a topic.
+   - Do NOT use "memory" as a topic.
+   - Do NOT use "everything" as a topic.
+
+EXAMPLES:
+
+User: "Remember that I like sushi."
+Output: {"action": "store_entry", "data": {"title": "User Preference", "summary": "User likes sushi", "tags": ["preference", "food"]}}
+
+User: "What do I know about Project X?"
+Output: {"action": "recall_topic", "topic": "project x"}
+
+User: "Recall facts about the python api"
+Output: {"action": "recall_topic", "topic": "python api"}
+
+User: "What do I remember?"
+Output: {"action": "none"}
+
+User: "Memory"
+Output: {"action": "none"}
+
+User: "Schedule a meeting"
+Output: {"action": "none"}
+"""
+
+def analyze_memory_intent(user_input):
+    """Determine if input is memory-related."""
+    prompt = MEMORY_PROMPT + f"\nUser Input: {user_input}\n"
+    try:
+        payload = {
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.1},
+            "format": "json"
+        }
+        res = requests.post(OLLAMA_URL, json=payload)
+        return json.loads(res.json()["response"])
+    except:
+        return {"action": "none"}
+
+
+# --- FOLDER WATCHER ---
+
+FOLDER_WATCHER_PROMPT = """You are the Folder Watcher Agent.
+Analyze the file context and decide what to do with it.
+
+CONTEXT:
+File Name: {file_name}
+File Type: {file_type}
+Extracted Text (if any): {extracted_text}
+
+AVAILABLE ACTIONS:
+- summarize_document (if file is PDF/TXT and needs reading)
+- create_notion_entry (if file contains a task or actionable item)
+- store_memory_entry (if file contains useful knowledge)
+- ignore (if system file or irrelevant)
+
+OUTPUT JSON:
+{
+  "action": "...",
+  "data": {
+    "title": "...",
+    "content_summary": "...",
+    "tags": [...]
+  }
+}
+"""
+
+def analyze_file_action(context):
+    """Determine action for a new file."""
+    prompt = FOLDER_WATCHER_PROMPT.format(**context)
+    try:
+        payload = {
+            "model": MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.1},
+            "format": "json"
+        }
+        res = requests.post(OLLAMA_URL, json=payload)
+        return json.loads(res.json()["response"])
+    except:
+        return {"action": "ignore"}

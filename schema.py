@@ -35,13 +35,29 @@ def validate_json(response_text):
         Parsed dict if valid, None otherwise.
     """
     try:
-        parsed = json.loads(response_text)
+        # Strip markdown code blocks if present
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+             response_text = response_text.split("```")[1].split("```")[0]
+        
+        parsed = json.loads(response_text.strip())
+        
+        # Check for multi-step plan structure
+        if "steps" in parsed:
+            if "intent" not in parsed:
+                return None
+            steps = parsed["steps"]
+            if not isinstance(steps, list) or len(steps) == 0:
+                return None
+            for step in steps:
+                if not validate_step(step):
+                    return None
+            return parsed
 
+        # Fallback to legacy single-step validation
         if not REQUIRED_KEYS.issubset(parsed.keys()):
             return None
-
-        # If steps are present, validate each one
-        if "steps" in parsed:
             steps = parsed["steps"]
             if not isinstance(steps, list) or len(steps) == 0:
                 return None

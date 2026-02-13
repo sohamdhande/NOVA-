@@ -203,9 +203,11 @@ class CalendarTool:
         elif action == "read_today":
             return self.get_today_events()
 
-        elif action == "create":
+        elif action == "create" or action == "create_event":
+            # Map parameters: planner uses "title", tool uses "event_title"
+            title = parameters.get("event_title") or parameters.get("title")
             return self.create_event(
-                title=parameters.get("event_title"),
+                title=title,
                 start_datetime=parameters.get("start_datetime"),
                 end_datetime=parameters.get("end_datetime")
             )

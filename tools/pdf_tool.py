@@ -201,7 +201,59 @@ class PDFTool:
 
         return text
 
-    def execute(self, file_path: str) -> dict:
+    def execute(self, action: str, parameters: dict = None) -> dict:
+        """
+        Route PDF actions with standard signature.
+        
+        Supported actions:
+        - summarize: Extract and summarize PDF
+        - extract: Extract raw text only
+        """
+        parameters = parameters or {}
+        
+        if action == "summarize":
+            file_path = parameters.get("file_path")
+            if not file_path:
+                return {
+                    "status": "error",
+                    "message": "Missing required parameter: file_path",
+                    "data": None
+                }
+            
+            return self._summarize_pdf(file_path)
+        
+        elif action == "extract":
+            file_path = parameters.get("file_path")
+            if not file_path:
+                return {
+                    "status": "error",
+                    "message": "Missing required parameter: file_path",
+                    "data": None
+                }
+            
+            text = self.extract_text(file_path)
+            
+            if text is None:
+                return {
+                    "status": "error",
+                    "message": f"File not found: {file_path}",
+                    "data": None
+                }
+            
+            return {
+                "status": "success",
+                "message": "Text extracted successfully.",
+                "data": text
+            }
+        
+        else:
+            return {
+                "status": "error",
+                "message": f"Unknown PDF action: {action}",
+                "data": None
+            }
+    
+    def _summarize_pdf(self, file_path: str) -> dict:
         """Full pipeline: extract text, summarize, return structured result."""
         print(f"[PDFTool] Processing: {file_path}")
 
@@ -212,16 +264,16 @@ class PDFTool:
             print("[PDFTool] Error: File not found.")
             return {
                 "status": "error",
-                "summary": None,
-                "message": f"File not found: {file_path}"
+                "message": f"File not found: {file_path}",
+                "data": None
             }
 
         if text == "":
             print("[PDFTool] Error: No extractable text in PDF.")
             return {
                 "status": "error",
-                "summary": None,
-                "message": "PDF contains no extractable text."
+                "message": "PDF contains no extractable text.",
+                "data": None
             }
 
         # Step 2: Summarize
@@ -232,6 +284,6 @@ class PDFTool:
 
         return {
             "status": "success",
-            "summary": summary,
-            "message": "PDF summarized successfully."
+            "message": "PDF summarized successfully.",
+            "data": summary
         }

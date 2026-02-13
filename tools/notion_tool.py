@@ -8,6 +8,7 @@ from notion_client import Client, APIResponseError
 logger = logging.getLogger(__name__)
 
 # Load local .env if present
+# Load local .env if present
 _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
     try:
@@ -16,13 +17,26 @@ if _env_path.exists():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, value = line.split("=", 1)
-                    os.environ.setdefault(key.strip(), value.strip())
+                    # Strip whitespace and quotes
+                    value = value.strip().strip("'").strip('"')
+                    os.environ.setdefault(key.strip(), value)
     except Exception as e:
         logger.warning(f"Failed to load .env file: {e}")
 
 # Read from environment
 NOTION_API_KEY = os.environ.get("NOTION_API_KEY")
-NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID")
+_db_id = os.environ.get("NOTION_DATABASE_ID")
+
+# Ensure valid UUID format for database ID
+NOTION_DATABASE_ID = None
+if _db_id:
+    try:
+        import uuid
+        NOTION_DATABASE_ID = str(uuid.UUID(_db_id))
+    except (ValueError, TypeError):
+        # Fallback to raw value if not a valid UUID, though it likely won't work
+        NOTION_DATABASE_ID = _db_id
+        logger.warning(f"Invalid UUID format for NOTION_DATABASE_ID: {_db_id}")
 
 class NotionTool:
     """Read, create, and update tasks in Notion using official SDK."""
@@ -31,7 +45,8 @@ class NotionTool:
         self.client = None
         if NOTION_API_KEY:
             try:
-                self.client = Client(auth=NOTION_API_KEY)
+                # Force a known compatible version of the API
+                self.client = Client(auth=NOTION_API_KEY, notion_version="2022-06-28")
             except Exception as e:
                 logger.error(f"Failed to initialize Notion Client: {e}")
         else:
@@ -179,6 +194,10 @@ class NotionTool:
             }
 
         except APIResponseError as e:
+            # Handle missing Status property gracefully
+            if e.code == "validation_error" and "Status" in str(e):
+                logger.debug("Database missing 'Status' property. Returning all tasks.")
+                return self.read_tasks(limit=limit)
             return self._handle_api_error(e)
         except Exception as e:
             return self._format_error_response(f"Failed to fetch open tasks: {str(e)}")
@@ -191,25 +210,27 @@ class NotionTool:
         if not title:
             return self._format_error_response("Task title is required.")
 
+        properties = {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": title
+                        }
+                    }
+                ]
+            },
+            "Status": {
+                "status": {
+                    "name": "Not started"
+                }
+            }
+        }
+
         try:
             new_page = self.client.pages.create(
                 parent={"database_id": NOTION_DATABASE_ID},
-                properties={
-                    "Name": {
-                        "title": [
-                            {
-                                "text": {
-                                    "content": title
-                                }
-                            }
-                        ]
-                    },
-                    "Status": {
-                        "status": {
-                            "name": "Not started"
-                        }
-                    }
-                }
+                properties=properties
             )
 
             return {
@@ -219,6 +240,23 @@ class NotionTool:
             }
 
         except APIResponseError as e:
+            # Retry without Status if property is missing
+            if e.code == "validation_error" and "Status" in str(e):
+                logger.debug("Database missing 'Status' property. Creating task without status.")
+                properties.pop("Status", None)
+                try:
+                    new_page = self.client.pages.create(
+                        parent={"database_id": NOTION_DATABASE_ID},
+                        properties=properties
+                    )
+                    return {
+                        "status": "success",
+                        "message": f"Task '{title}' created successfully (without Status).",
+                        "data": {"id": new_page["id"], "url": new_page.get("url")}
+                    }
+                except Exception as retry_e:
+                    return self._format_error_response(f"Failed to create task (retry): {str(retry_e)}")
+            
             return self._handle_api_error(e)
         except Exception as e:
              return self._format_error_response(f"Failed to create task: {str(e)}")
@@ -265,10 +303,10 @@ class NotionTool:
         elif action == "read_open":
             return self.read_open_tasks(limit=parameters.get("limit", 10))
             
-        elif action == "create":
+        elif action == "create" or action == "create_task":
             return self.create_task(title=parameters.get("task_title") or parameters.get("title"))
             
-        elif action == "update":
+        elif action == "update" or action == "update_task" or action == "update_task_status":
             return self.update_task_status(
                 task_id=parameters.get("task_id") or parameters.get("id"),
                 status=parameters.get("task_status") or parameters.get("status", "Done")

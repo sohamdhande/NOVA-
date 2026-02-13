@@ -1,0 +1,349 @@
+[
+  {
+    "id": "fde4347e-14fe-40e1-95dd-981f001f083f",
+    "timestamp": "2026-02-13T17:25:24.590466",
+    "source_type": "manual",
+    "title": "NOVA Architecture Finalization",
+    "summary": "The user finalized the NOVA architecture today",
+    "tags": [
+      "architecture",
+      "work"
+    ]
+  },
+  {
+    "id": "13b74675-02bc-4f26-bb77-a2b3b938aadd",
+    "timestamp": "2026-02-13T18:50:20.985153",
+    "source_type": "manual",
+    "title": "User Preference",
+    "summary": "User likes sushi",
+    "tags": [
+      "preference",
+      "food"
+    ]
+  },
+  {
+    "id": "a93c5636-bd3f-4a7d-9db6-75031dbf715a",
+    "timestamp": "2026-02-13T19:37:41.278641",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "15bfcdb9-214c-457b-b98a-e0edadcff842",
+    "timestamp": "2026-02-13T19:41:31.303928",
+    "source_type": "manual",
+    "title": "Telemetry Observability System",
+    "summary": "The user has implemented a telemetry observability system with structured metrics.",
+    "tags": [
+      "telemetry",
+      "observability",
+      "metrics"
+    ]
+  },
+  {
+    "id": "8049f81d-ede5-47c3-a4af-643605611ca7",
+    "timestamp": "2026-02-13T19:43:56.814559",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "b8c03dbd-b040-4606-ad3d-4510c8d8819c",
+    "timestamp": "2026-02-13T19:45:07.362050",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "b1c8d0d4-4b12-4a19-899b-16b4306bf5ab",
+    "timestamp": "2026-02-13T19:47:19.088651",
+    "source_type": "manual",
+    "title": "Telemetry Observability System",
+    "summary": "The user has implemented a telemetry observability system with structured metrics.",
+    "tags": [
+      "telemetry",
+      "observability",
+      "metrics"
+    ]
+  },
+  {
+    "id": "3649ceb1-132b-4679-b999-8d7a8b576a93",
+    "timestamp": "2026-02-13T19:50:50.597789",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "afee3341-e8f3-4453-a535-cd44705f9b8a",
+    "timestamp": "2026-02-13T19:51:59.447722",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "70a8dc16-3109-460c-b8f1-e52951045f52",
+    "timestamp": "2026-02-13T19:54:02.797804",
+    "source_type": "manual",
+    "title": "Telemetry Observability System",
+    "summary": "The user has implemented a telemetry observability system with structured metrics.",
+    "tags": [
+      "telemetry",
+      "observability",
+      "system",
+      "metrics"
+    ]
+  },
+  {
+    "id": "49ab8154-1547-4c99-a96c-c0ea75b1bb6a",
+    "timestamp": "2026-02-13T19:55:07.553436",
+    "source_type": "manual",
+    "title": "Calendar Guardrails",
+    "summary": "Strict mutation guardrails added to prevent excessive calendar events",
+    "tags": [
+      "calendar",
+      "guardrails"
+    ]
+  },
+  {
+    "id": "41c5e402-1129-4df1-8899-da12d7e760e5",
+    "timestamp": "2026-02-13T20:05:42.960488",
+    "source_type": "manual",
+    "title": "Unique Concept 123",
+    "summary": "   This is a unique summary for testing deduplication.   ",
+    "tags": [
+      "test",
+      "dedup"
+    ]
+  },
+  {
+    "id": "763b90d9-d408-4204-be0f-90b72fd1e5d5",
+    "timestamp": "2026-02-13T20:33:16.180373",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "97f35d4e-9a88-4c6f-bfec-b504cf8d4dc3",
+    "timestamp": "2026-02-13T20:59:18.689066",
+    "source_type": "manual",
+    "title": "Unique Concept 123",
+    "summary": "   This is a unique summary for testing deduplication.   ",
+    "tags": [
+      "test",
+      "dedup"
+    ]
+  },
+  {
+    "id": "8b841f08-52a6-44c7-b8a9-0d221fe3c2ab",
+    "timestamp": "2026-02-13T20:59:18.698384",
+    "source_type": "manual",
+    "title": "Different Title",
+    "summary": "   This is a unique summary for testing deduplication.   ",
+    "tags": [
+      "other_tag"
+    ]
+  },
+  {
+    "id": "b86d1932-bcb4-4580-ab08-b1dada38ae76",
+    "timestamp": "2026-02-13T21:00:16.529445",
+    "source_type": "manual",
+    "title": "Unique Concept 123",
+    "summary": "   This is a unique summary for testing deduplication.   ",
+    "tags": [
+      "test",
+      "dedup"
+    ]
+  },
+  {
+    "id": "dd4b33d2-c9aa-4213-965e-c5e64f94cc00",
+    "timestamp": "2026-02-13T21:00:46.752521",
+    "source_type": "test",
+    "title": "Machine Learning Basics",
+    "summary": "Introduction to neural networks and deep learning concepts",
+    "tags": [
+      "ml",
+      "ai"
+    ]
+  },
+  {
+    "id": "66353b49-e2f4-4de9-b5b6-4ab996b1f9b2",
+    "timestamp": "2026-02-13T21:00:46.762873",
+    "source_type": "test",
+    "title": "Cooking Tips",
+    "summary": "How to make perfect pasta and Italian sauces",
+    "tags": [
+      "food",
+      "cooking"
+    ]
+  },
+  {
+    "id": "cb5942e0-4fe6-43cb-ac23-013d6f4b0f13",
+    "timestamp": "2026-02-13T21:01:07.103678",
+    "source_type": "manual",
+    "title": "Python 3.14 Features",
+    "summary": "Python 3.14 introduces new JIT compiler improvements.",
+    "tags": [
+      "python",
+      "tech"
+    ]
+  },
+  {
+    "id": "c2d6ece9-ede0-450e-a702-71f74540e95d",
+    "timestamp": "2026-02-13T21:03:36.278948",
+    "source_type": "test",
+    "title": "First Title",
+    "summary": "This is unique test content for validation.",
+    "tags": [
+      "test"
+    ]
+  },
+  {
+    "id": "f689d723-e354-4c02-a5d6-757a9426208f",
+    "timestamp": "2026-02-13T21:03:36.289516",
+    "source_type": "test",
+    "title": "Python Programming",
+    "summary": "Advanced Python techniques and best practices for developers.",
+    "tags": [
+      "python",
+      "programming"
+    ]
+  },
+  {
+    "id": "77ab3837-9e0f-4039-84e3-270167c05c9c",
+    "timestamp": "2026-02-13T21:12:50.045287",
+    "source_type": "manual",
+    "title": "Implemented Structured Logging",
+    "summary": "The user has implemented structured logging",
+    "tags": [
+      "programming",
+      "logging"
+    ]
+  },
+  {
+    "id": "46feb833-d58a-4153-857f-c6c5f2d100d1",
+    "timestamp": "2026-02-13T21:13:59.739701",
+    "source_type": "manual",
+    "title": "User Preference",
+    "summary": "User likes sushi",
+    "tags": [
+      "preference",
+      "food"
+    ]
+  },
+  {
+    "id": "19c42ccf-360d-45b0-a089-a97b838c34a1",
+    "timestamp": "2026-02-13T21:48:40.797504",
+    "source_type": "manual",
+    "title": "Migration of Nova",
+    "summary": "Nova was migrated to a persistent application container.",
+    "tags": [
+      "nova",
+      "migration",
+      "container"
+    ]
+  },
+  {
+    "id": "ccefe735-b8fc-43fa-a433-515f6f8f2ce5",
+    "timestamp": "2026-02-13T22:23:00.423115",
+    "source_type": "manual",
+    "title": "that I deployed the stabilization refactor success",
+    "summary": "that I deployed the stabilization refactor successfully.",
+    "tags": []
+  },
+  {
+    "id": "6d5a48b6-ac7c-4912-9902-e77e7695df91",
+    "timestamp": "2026-02-13T23:22:15.385487",
+    "source_type": "manual",
+    "title": "testing contract hardening",
+    "summary": "testing contract hardening",
+    "tags": []
+  },
+  {
+    "id": "67d792f7-5ce4-4341-ba42-30e61a7328e3",
+    "timestamp": "2026-02-13T23:27:17.196192",
+    "source_type": "manual",
+    "title": "contract hardening complete",
+    "summary": "contract hardening complete",
+    "tags": []
+  },
+  {
+    "id": "4055a608-14a9-4b4a-9510-2c580e79eb57",
+    "timestamp": "2026-02-13T23:39:43.148662",
+    "source_type": "manual",
+    "title": "Untitled",
+    "summary": "",
+    "tags": []
+  },
+  {
+    "id": "714d386d-aea1-4d20-8eb2-441466279427",
+    "timestamp": "2026-02-13T23:39:58.750463",
+    "source_type": "manual",
+    "title": "Untitled",
+    "summary": "",
+    "tags": []
+  },
+  {
+    "id": "aa3ec049-c815-4595-8be9-fb42c780c017",
+    "timestamp": "2026-02-13T23:50:08.905417",
+    "source_type": "manual",
+    "title": "Untitled",
+    "summary": "",
+    "tags": []
+  },
+  {
+    "id": "99a2020c-48fc-4302-bc1d-83f62edd74bb",
+    "timestamp": "2026-02-14T00:17:37.628883",
+    "source_type": "manual",
+    "title": "that I deployed Nova v2 successfully.",
+    "summary": "that I deployed Nova v2 successfully.",
+    "tags": []
+  },
+  {
+    "id": "cd4d8080-5fb5-4165-a3cd-541417d96a02",
+    "timestamp": "2026-02-14T00:38:02.093090",
+    "source_type": "manual",
+    "title": "that I completed the stress test successfully",
+    "summary": "that I completed the stress test successfully",
+    "tags": []
+  },
+  {
+    "id": "68450567-8c05-4999-8e7d-0f5e84326fbc",
+    "timestamp": "2026-02-14T00:38:02.120014",
+    "source_type": "manual",
+    "title": "that NOVA handles 20 commands without degradation",
+    "summary": "that NOVA handles 20 commands without degradation",
+    "tags": []
+  },
+  {
+    "id": "fa17a3e8-47aa-4e94-9547-ff41674398d3",
+    "timestamp": "2026-02-14T00:41:01.902385",
+    "source_type": "manual",
+    "title": "that all 20 commands executed successfully",
+    "summary": "that all 20 commands executed successfully",
+    "tags": []
+  }
+]
