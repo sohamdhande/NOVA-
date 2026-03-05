@@ -2,7 +2,7 @@ import requests
 import json
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "mistral:7b-instruct"
+MODEL = "llama3.2"
 
 SYSTEM_PROMPT = """
 You are NOVA's Task & Scheduling Orchestrator.

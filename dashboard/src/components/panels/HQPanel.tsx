@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useApi } from "../../hooks/useApi";
 import { useNovaStore } from "../../store/novaStore";
+import { ChatMessage, type NovaMessage } from "../chat/ChatMessage";
+import { FileAutocomplete } from '../chat/FileAutocomplete';
+import { CommandSuggestions } from '../chat/CommandSuggestions';
+import { AdvisoryBanner } from '../chat/AdvisoryBanner';
 
 /* ─── shared helpers ─── */
 function Skeleton() {
@@ -25,9 +29,10 @@ export function HQPanel() {
     const [briefing, setBriefing] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [chatInput, setChatInput] = useState("");
-    const [chatResponse, setChatResponse] = useState("");
-    const [chatLoading, setChatLoading] = useState(false);
+    const [input, setInput] = useState("");
+    const [messages, setMessages] = useState<NovaMessage[]>([]);
+    const [isThinking, setIsThinking] = useState(false);
+    const [showAutocomplete, setShowAutocomplete] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(new Date());
     const chatBoxRef = useRef<HTMLDivElement>(null);
 
@@ -54,27 +59,83 @@ export function HQPanel() {
 
     useEffect(() => { fetchAll(); const iv = setInterval(fetchAll, 30000); return () => clearInterval(iv); }, [fetchAll]);
 
-    const handleChat = async () => {
-        if (!chatInput.trim() || chatLoading) return;
-        setChatLoading(true);
-        setChatResponse("");
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setInput(val);
+        setShowAutocomplete(val.includes('~/') || val.startsWith('/'));
+    };
+
+    const handlePathSelect = (path: string) => {
+        const parts = input.split(' ');
+        parts[parts.length - 1] = path;
+        setInput(parts.join(' '));
+        setShowAutocomplete(false);
+    };
+
+    const sendMessage = async () => {
+        if (!input.trim() || isThinking) return;
+
+        const userMsg: NovaMessage = {
+            id: Date.now().toString(),
+            role: "user",
+            content: input,
+            timestamp: new Date()
+        };
+
+        setMessages(prev => [...prev, userMsg]);
+        setInput("");
+        setIsThinking(true);
+        setTimeout(() => chatBoxRef.current?.scrollTo(0, chatBoxRef.current.scrollHeight), 50);
+
         try {
-            const data = await post<any>("/api/chat", { message: chatInput });
-            // Typewriter effect
-            const text = data?.reply ?? data?.response ?? JSON.stringify(data);
-            let i = 0;
-            const iv = setInterval(() => {
-                setChatResponse((p) => p + text[i]);
-                i++;
-                if (i >= text.length) clearInterval(iv);
-                chatBoxRef.current?.scrollTo(0, chatBoxRef.current.scrollHeight);
-            }, 15);
-            setChatInput("");
+            const data = await post<any>("/api/chat", { message: userMsg.content });
+
+            const novaMsg: NovaMessage = {
+                id: (Date.now() + 1).toString(),
+                role: 'nova',
+                content: data.message,
+                block_type: data.block_type,
+                data: data.data,
+                requires_approval: data.requires_approval,
+                risk: data.risk,
+                success: data.success,
+                timestamp: new Date()
+            };
+
+            setMessages(prev => [...prev, novaMsg]);
+
+            if (data.block_type === 'navigation' && data.data?.navigate_to) {
+                setActivePanel(data.data.navigate_to);
+            }
         } catch {
-            setChatResponse("Error: failed to reach N.O.V.A");
+            const errorMsg: NovaMessage = {
+                id: (Date.now() + 1).toString(),
+                role: 'nova',
+                content: "Error: failed to reach N.O.V.A",
+                block_type: "error",
+                timestamp: new Date()
+            };
+            setMessages(prev => [...prev, errorMsg]);
         } finally {
-            setChatLoading(false);
+            setIsThinking(false);
+            setTimeout(() => chatBoxRef.current?.scrollTo(0, chatBoxRef.current.scrollHeight), 50);
         }
+    };
+
+    const handleApprove = (id: string) => {
+        setMessages(prev => prev.map(m =>
+            m.id === id
+                ? { ...m, block_type: 'mission', content: 'Action approved. Executing...' }
+                : m
+        ));
+    };
+
+    const handleDeny = (id: string) => {
+        setMessages(prev => prev.map(m =>
+            m.id === id
+                ? { ...m, block_type: 'error', content: 'Action denied by user.' }
+                : m
+        ));
     };
 
     /* ─── Health ring ─── */
@@ -98,9 +159,9 @@ export function HQPanel() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-6">
+            <div className="grid grid-cols-5 gap-6 h-full">
                 {/* LEFT COLUMN */}
-                <div className="col-span-3 flex flex-col gap-5">
+                <div className="col-span-3 flex flex-col gap-4">
                     {/* Health Ring */}
                     <div className="flex flex-col items-center py-4">
                         <div className="relative" style={{ width: 200, height: 200 }}>
@@ -133,29 +194,63 @@ export function HQPanel() {
                     </div>
 
                     {/* Quick Command Bar */}
-                    <div className="mt-2">
-                        <div className="flex gap-2">
-                            <input
-                                value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                                onKeyDown={(e) => e.key === "Enter" && handleChat()}
-                                placeholder="Ask N.O.V.A anything..."
-                                className="flex-1 bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded px-3 py-2 text-xs font-mono text-[var(--nova-text)] outline-none focus:border-[var(--nova-accent)] transition-colors"
+                    <AdvisoryBanner onActionClick={(cmd) => { setInput(cmd); setTimeout(sendMessage, 50); }} />
+                    <div className="flex flex-col nova-card" style={{ height: '320px' }}>
+                        {/* Scrollable message area - fixed height */}
+                        <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ minHeight: 0 }} ref={chatBoxRef}>
+                            <CommandSuggestions
+                                visible={messages.length === 0 && !isThinking && input === ''}
+                                onSelect={(cmd) => { setInput(cmd); setTimeout(sendMessage, 50); }}
                             />
-                            <button onClick={handleChat} disabled={chatLoading}
-                                className="px-3 py-2 bg-[var(--nova-accent)]/10 border border-[var(--nova-accent)]/30 rounded text-[var(--nova-accent)] text-xs font-mono cursor-pointer hover:bg-[var(--nova-accent)]/20 disabled:opacity-50">
-                                {chatLoading ? "..." : "→"}
-                            </button>
+                            {messages.map(msg => (
+                                <ChatMessage
+                                    key={msg.id}
+                                    message={msg}
+                                    onApprove={() => handleApprove(msg.id)}
+                                    onDeny={() => handleDeny(msg.id)}
+                                />
+                            ))}
+                            {isThinking && (
+                                <div className="flex justify-start">
+                                    <div className="px-3 py-2 rounded border border-[rgba(0,255,204,0.2)] bg-[#0a1a1a]">
+                                        <span className="text-[#00ffcc] text-xs block mb-1">N.O.V.A</span>
+                                        <span className="text-[#4a6a6a] text-sm animate-pulse">processing...</span>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                        {chatResponse && (
-                            <div ref={chatBoxRef} className="mt-2 bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded p-3 text-xs font-mono text-[var(--nova-text)] max-h-40 overflow-y-auto whitespace-pre-wrap">
-                                {chatResponse}
+
+                        {/* Fixed input bar at bottom */}
+                        <div className="relative">
+                            <FileAutocomplete
+                                query={input}
+                                onSelect={handlePathSelect}
+                                visible={showAutocomplete}
+                            />
+                            <div className="border-t border-[rgba(0,255,204,0.12)] p-2 flex gap-2 flex-shrink-0">
+                                <input
+                                    type="text"
+                                    value={input}
+                                    onChange={handleInputChange}
+                                    onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                                    placeholder="Ask N.O.V.A anything..."
+                                    disabled={isThinking}
+                                    className="flex-1 bg-transparent text-[#e2e8f0] font-mono text-sm outline-none placeholder-[#4a6a6a] disabled:opacity-50"
+                                />
+                                <button
+                                    onClick={sendMessage}
+                                    disabled={isThinking || !input.trim()}
+                                    className="text-[#00ffcc] hover:text-white disabled:opacity-30 cursor-pointer text-lg px-2 flex-shrink-0"
+                                >
+                                    →
+                                </button>
                             </div>
-                        )}
+                        </div>
                     </div>
                 </div>
 
                 {/* RIGHT COLUMN */}
-                <div className="col-span-2 flex flex-col gap-5">
+                <div className="col-span-2 flex flex-col gap-4 overflow-y-auto">
                     {/* Morning Briefing */}
                     <div>
                         <h3 className="text-[9px] font-mono tracking-[0.3em] text-[var(--nova-muted)] mb-3 uppercase">MORNING BRIEFING</h3>

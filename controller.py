@@ -129,7 +129,7 @@ class Controller:
         try:
             # Running this blocking DB fetch via to_thread since we are in async context
             def fetch_cmd():
-                conn = sqlite3.connect(db_path)
+                conn = sqlite3.connect(db_path, check_same_thread=False)
                 conn.row_factory = sqlite3.Row
                 row = conn.execute("SELECT * FROM events WHERE id=?", (action_id,)).fetchone()
                 conn.close()
@@ -179,84 +179,7 @@ class Controller:
         
         # Empty input already handled by CLI - this is defensive
         if not command:
-            return {
-                "intent": "none",
-                "domain": "system",
-                "action": "none",
-                "risk": "low",
-                "status": "ignored",
-                "response": ""
-            }
-        
-        # -----------------------------------------------------------
-        # STEP 2: SYSTEM COMMANDS (bypass planner)
-        # -----------------------------------------------------------
-        # These are handled by CLI but included here for completeness
-        cmd_lower = command.lower().strip()
-        
-        if cmd_lower in ("exit", "quit"):
-            return {"intent": "system", "domain": "system", "action": "exit", 
-                    "risk": "low", "status": "success", "response": "Exiting"}
-        
-        # -----------------------------------------------------------
-        # STEP 3: EXPLICIT MEMORY PATTERNS (bypass planner)
-        # -----------------------------------------------------------
-        
-        # Memory store patterns
-        memory_store_patterns = [
-            (r'^remember\s+(.+)', "remember"),
-            (r'^store\s+that\s+(.+)', "store that"),
-            (r'^note\s+that\s+(.+)', "note that"),
-            (r'^save\s+memory\s+(.+)', "save memory")
-        ]
-        
-        for pattern, trigger in memory_store_patterns:
-            match = re.match(pattern, cmd_lower, re.IGNORECASE)
-            if match:
-                content = command[len(trigger):].strip()
-                if content:
-                    return self._execute_memory_store(command, content)
-        
-        # Memory search/recall patterns
-        memory_query_patterns = [
-            (r'^what\s+do\s+i\s+remember\s+about\s+(.+)', "what do i remember about"),
-            (r'^have\s+i\s+worked\s+on\s+(.+)', "have i worked on"),
-            (r'^did\s+i\s+(.+)', "did i"),
-            (r'^what\s+did\s+i\s+(.+)', "what did i"),
-            (r'^recall\s+(.+)', "recall"),
-            (r'^search\s+memory\s+for\s+(.+)', "search memory for"),
-            (r'^what\s+do\s+you\s+know\s+about\s+(.+)', "what do you know about")
-        ]
-        
-        for pattern, trigger in memory_query_patterns:
-            match = re.match(pattern, cmd_lower, re.IGNORECASE)
-            if match:
-                topic = match.group(1).strip().rstrip(string.punctuation)
-                if topic and len(topic) >= config.MIN_TOPIC_LENGTH:
-                    return self._execute_memory_recall(command, topic)
-        
-        # -----------------------------------------------------------
-        # STEP 4: GIBBERISH DETECTION (pre-planner filter)
-        # -----------------------------------------------------------
-        
-        if self._is_gibberish(command):
-            self._log_execution(
-                command=command,
-                intent="unknown",
-                domain="unknown",
-                action="none",
-                risk="low",
-                status="rejected",
-                response="Command not recognized."
-            )
-            return {
-                "intent": "unknown",
-                "domain": "unknown",
-                "action": "none",
-                "risk": "low",
-                "status": "rejected",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         # -----------------------------------------------------------
         # STEP 5: PLANNER INVOCATION
@@ -267,42 +190,11 @@ class Controller:
             from schema import validate_json
             from validator import validate_plan
         except ImportError as e:
-            return {
-                "intent": "error",
-                "domain": "system",
-                "action": "startup",
-                "risk": "high",
-                "status": "error",
-                "response": f"Failed to load required modules: {e}"
-            }
-        
-        self.telemetry.increment("planner_invoked")
-        
-        try:
-            raw_output = generate_plan(command)
-            parsed = validate_json(raw_output)
-        except Exception as e:
-            self.logger.log_error(command, f"Planning Error: {e}")
-            self.telemetry.increment("planner_failed")
-            return {
-                "intent": "error",
-                "domain": "system",
-                "action": "plan",
-                "risk": "low",
-                "status": "error",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         if not parsed:
             self.telemetry.increment("planner_failed")
-            return {
-                "intent": "error",
-                "domain": "system",
-                "action": "plan",
-                "risk": "low",
-                "status": "error",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         # -----------------------------------------------------------
         # STEP 6: VALIDATION & CORRECTION LOOP
@@ -328,16 +220,9 @@ class Controller:
                     action="correct",
                     risk="low",
                     status="error",
-                    response="Command not recognized."
+                    response="Redirected to conversation fallback."
                 )
-                return {
-                    "intent": "error",
-                    "domain": "system",
-                    "action": "correct",
-                    "risk": "high",
-                    "status": "error",
-                    "response": "Command not recognized."
-                }
+                return self._fallback_chat(command)
             
             self.telemetry.increment("correction_invoked", metadata={"attempt": attempt_idx + 1})
             corrected = correct_plan(parsed, validation["errors"])
@@ -351,16 +236,9 @@ class Controller:
                     action="correct",
                     risk="low",
                     status="error",
-                    response="Command not recognized."
+                    response="Redirected to conversation fallback."
                 )
-                return {
-                    "intent": "error",
-                    "domain": "system",
-                    "action": "correct",
-                    "risk": "high",
-                    "status": "error",
-                    "response": "Command not recognized."
-                }
+                return self._fallback_chat(command)
             
             parsed = corrected
         
@@ -377,16 +255,9 @@ class Controller:
                 action="none",
                 risk="low",
                 status="rejected",
-                response="Command not recognized."
+                response="Redirected to conversation fallback."
             )
-            return {
-                "intent": "unknown",
-                "domain": "unknown",
-                "action": "none",
-                "risk": "low",
-                "status": "rejected",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         # Verify domain contract
         if not self._verify_domain_contract(parsed):
@@ -397,16 +268,9 @@ class Controller:
                 action=parsed.get("action", "none"),
                 risk="low",
                 status="rejected",
-                response="Command not recognized."
+                response="Redirected to conversation fallback."
             )
-            return {
-                "intent": "unknown",
-                "domain": parsed.get("domain", "unknown"),
-                "action": "none",
-                "risk": "low",
-                "status": "rejected",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         # Verify action contract (for single-step or steps)
         if not self._verify_action_contract(parsed):
@@ -417,16 +281,9 @@ class Controller:
                 action=parsed.get("action", "none"),
                 risk="low",
                 status="rejected",
-                response="Command not recognized."
+                response="Redirected to conversation fallback."
             )
-            return {
-                "intent": "unknown",
-                "domain": parsed.get("domain", "unknown"),
-                "action": parsed.get("action", "none"),
-                "risk": "low",
-                "status": "rejected",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         
         # -----------------------------------------------------------
         # STEP 8: EXECUTION ROUTING
@@ -661,537 +518,7 @@ class Controller:
             response=result["message"]
         )
         
-        return {
-            "intent": "memory",
-            "domain": "memory",
-            "action": "store_entry",
-            "risk": "low",
-            "status": "success",
-            "response": result["message"]
-        }
-    
-    def _interpolate_parameters(self, step, step_results, command):
-        """
-        Inject data from previous steps into current step parameters.
-        
-        Use case: "schedule unfinished tasks for tomorrow 2pm"
-        Step 1: notion/read_open → returns task list
-        Step 2: calendar/create_event → needs task titles + datetime
-        
-        This method enriches Step 2 parameters with Step 1 data.
-        """
-        from utils.date_parser import parse_natural_date
-        
-        domain = step.get("domain")
-        action = step.get("action")
-        params = step.get("parameters", {})
-        
-        # Only interpolate for calendar/create_event following notion/read_open
-        if domain == "calendar" and action == "create_event" and len(step_results) > 0:
-            # Check if previous step was notion read
-            prev_step = step_results[-1]
-            
-            if prev_step.get("domain") == "notion" and prev_step.get("action") == "read_open":
-                # Extract task data from previous response
-                prev_response = prev_step.get("response", "")
-                
-                # Parse task list from response
-                tasks = self._parse_tasks_from_response(prev_response)
-                
-                if tasks:
-                    # If no title specified, use task summary
-                    if not params.get("title"):
-                        if len(tasks) == 1:
-                            params["title"] = tasks[0]
-                        else:
-                            params["title"] = f"Review {len(tasks)} unfinished tasks"
-                    
-                    # If no description, add task list
-                    if not params.get("description"):
-                        params["description"] = "Tasks to review:\n" + "\n".join([f"- {t}" for t in tasks])
-                    
-                    if config.DEBUG:
-                        print(f"[Controller] Interpolated params (before date parse): {params}")
-        
-        # Parse natural_datetime into start_datetime/end_datetime for calendar events
-        if domain == "calendar" and action == "create_event":
-            # Get natural datetime from params or extract from command
-            natural_dt = params.get("natural_datetime")
-            
-            # Check if natural_dt is vague or empty - replace with extracted datetime
-            vague_terms = ["sometime", "later", "soon", "eventually", "someday", ""]
-            if not natural_dt or any(vague in str(natural_dt).lower() for vague in vague_terms):
-                natural_dt = self._extract_datetime_from_command(command)
-                if config.DEBUG:
-                    print(f"[Controller] Replaced vague/empty datetime with: '{natural_dt}'")
-            elif config.DEBUG:
-                print(f"[Controller] Using planner's natural_datetime: '{natural_dt}'")
-            
-            # If still no title, generate a generic one
-            if not params.get("title"):
-                params["title"] = "Scheduled task"
-                if config.DEBUG:
-                    print(f"[Controller] No title provided, using default: '{params['title']}'")
-            
-            # Parse datetime if we don't have start_datetime yet
-            if not params.get("start_datetime") and natural_dt:
-                try:
-                    duration = params.get("duration_minutes", 60)
-                    start_iso, end_iso = parse_natural_date(natural_dt, duration_minutes=duration)
-                    
-                    params["start_datetime"] = start_iso
-                    params["end_datetime"] = end_iso
-                    
-                    if config.DEBUG:
-                        print(f"[Controller] Parsed '{natural_dt}' → {start_iso} to {end_iso}")
-                        
-                except Exception as e:
-                    if config.DEBUG:
-                        print(f"[Controller] Date parsing failed: {e}")
-                    # Keep params as-is, will fail validation later
-        
-        # Update step with enriched parameters
-        step["parameters"] = params
-        return step
-    
-    def _parse_tasks_from_response(self, response):
-        """Extract task titles from notion read response."""
-        tasks = []
-        
-        # Response format: "Found 2 task(s)." or similar
-        # Try to extract task names if available
-        lines = response.split("\n")
-        for line in lines:
-            # Look for task patterns like "- Task name" or "• Task name"
-            if line.strip().startswith("-") or line.strip().startswith("•"):
-                task = line.strip().lstrip("-•").strip()
-                if task:
-                    tasks.append(task)
-        
-        return tasks
-    
-    def _extract_datetime_from_command(self, command):
-        """Extract temporal reference from user command."""
-        import re
-        
-        command_lower = command.lower()
-        
-        # Specific patterns (high priority)
-        specific_patterns = [
-            r"tomorrow\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
-            r"tomorrow\s+(\d{1,2}\s*(?:am|pm))",
-            r"today\s+at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
-            r"(next\s+\w+\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
-            r"(this\s+\w+\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
-            r"at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))",
-        ]
-        
-        for pattern in specific_patterns:
-            match = re.search(pattern, command_lower)
-            if match:
-                return match.group(0)
-        
-        # General day references (medium priority)
-        day_patterns = [
-            r"\b(tomorrow)\b",
-            r"\b(today)\b",
-            r"\b(tonight)\b",
-            r"\b(next\s+monday|next\s+tuesday|next\s+wednesday|next\s+thursday|next\s+friday|next\s+saturday|next\s+sunday)\b",
-        ]
-        
-        for pattern in day_patterns:
-            match = re.search(pattern, command_lower)
-            if match:
-                matched_day = match.group(1)
-                # Add default time based on context
-                if "morning" in command_lower:
-                    return f"{matched_day} at 9am"
-                elif "afternoon" in command_lower:
-                    return f"{matched_day} at 2pm"
-                elif "evening" in command_lower or "tonight" in matched_day:
-                    return f"{matched_day} at 6pm"
-                else:
-                    # Default to 2pm for unspecified time
-                    return f"{matched_day} at 2pm"
-        
-        # Vague references (low priority) - map to sensible defaults
-        if any(word in command_lower for word in ["sometime", "later", "soon", "eventually"]):
-            # Default to tomorrow at 2pm for vague requests
-            return "tomorrow at 2pm"
-        
-        # Last resort fallback
-        return "tomorrow at 2pm"
-    
-    def _execute_memory_recall(self, command, topic):
-        """Execute explicit memory recall."""
-        result = self.memory_tool.execute("recall_topic", {"topic": topic})
-        
-        self._log_execution(
-            command=command,
-            intent="memory",
-            domain="memory",
-            action="recall_topic",
-            risk="low",
-            status="success",
-            response=result["message"]
-        )
-        
-        return {
-            "intent": "memory",
-            "domain": "memory",
-            "action": "recall_topic",
-            "risk": "low",
-            "status": "success",
-            "response": result["message"]
-        }
-    
-    # ================================================================
-    # MULTI-STEP EXECUTION ENGINE
-    # ================================================================
-    
-    def _execute_steps(self, command, plan):
-        """
-        Deterministic multi-step execution.
-        
-        For each step:
-        1. Check confirmation if high-risk
-        2. Validate step contract
-        3. Run guardrail
-        4. Increment mutation_attempt
-        5. Execute
-        6. Increment mutation_success/blocked
-        7. Stop on failure
-        """
-        steps = plan.get("steps", [])
-        step_results = []
-        
-        for i, step in enumerate(steps):
-            step_num = i + 1
-            domain = step.get("domain", "unknown")
-            action = step.get("action", "unknown")
-            risk = step.get("risk", "low")
-            
-            if config.DEBUG:
-                print(f"[Controller] Step {step_num}/{len(steps)}: {domain}/{action}")
-            
-            # Parameter interpolation: inject previous step data
-            step = self._interpolate_parameters(step, step_results, command)
-            
-            # High-risk confirmation
-            if risk == "high" and plan.get("requires_confirmation", False):
-                self._publish_sync(NovaEvent(
-                    source="controller",
-                    type="approval_required",
-                    payload={
-                        "command": command,
-                        "reason": f"High risk action detected: {action} on {domain}. Requires manual oversight."
-                    },
-                    priority=8
-                ))
-                
-                # Check if this precise command was just manually approved via the queue
-                if command in self._pending_confirmations and self._pending_confirmations[command]:
-                    authorized = True
-                    # Consume the approval so it cannot be reused
-                    self._pending_confirmations.pop(command)
-                else:
-                    try:
-                        # Check if we are already inside a running loop (like FastAPI)
-                        loop = asyncio.get_running_loop()
-                        import concurrent.futures
-                        with concurrent.futures.ThreadPoolExecutor(1) as pool:
-                            # Call async from sync thread
-                            authorized = pool.submit(
-                                asyncio.run, 
-                                biometric_auth.require_auth(action_name=action, risk_level=risk)
-                            ).result()
-                    except RuntimeError:
-                        # Simple sync call
-                        authorized = asyncio.run(biometric_auth.require_auth(
-                            action_name=action,
-                            risk_level=risk
-                        ))
-                
-                if not authorized:
-                    return {"status": "blocked", "reason": "Authorization denied"}
-            
-            # Mutation detection
-            is_mutation = action in ("create", "update", "delete", "schedule", "send", "modify", "create_event", "create_task", "update_event", "update_task", "delete_event", "delete_task")
-            
-            # Guardrail check for mutations
-            if is_mutation:
-                allowed, reason = self.guardrail.check_constraints(domain, action)
-                
-                if not allowed:
-                    self.telemetry.increment("mutation_blocked", metadata={
-                        "reason": reason or "guardrail",
-                        "step": step_num
-                    })
-                    
-                    blocked_result = {
-                        "domain": domain,
-                        "action": action,
-                        "risk": risk,
-                        "status": "blocked",
-                        "response": f"Guardrail blocked: {reason or 'Safety violation'}"
-                    }
-                    step_results.append(blocked_result)
-                    
-                    self._log_execution(
-                        command=command,
-                        intent=plan.get("intent", "task"),
-                        domain=domain,
-                        action=action,
-                        risk=risk,
-                        status="blocked",
-                        response=blocked_result["response"]
-                    )
-                    
-                    return {
-                        "intent": plan.get("intent", "task"),
-                        "domain": domain,
-                        "action": action,
-                        "risk": risk,
-                        "status": "blocked",
-                        "response": blocked_result["response"],
-                        "step_results": step_results
-                    }
-                
-                # Increment mutation attempt
-                self.telemetry.increment("mutation_attempt", metadata={"step": step_num})
-            
-            # Execute step
-            try:
-                result = self._execute_step(step)
-                
-                # Increment mutation success if applicable
-                if is_mutation and result.get("status") == "success":
-                    self.telemetry.increment("mutation_success", metadata={"step": step_num})
-                
-                step_results.append(result)
-                
-                # Stop on error
-                if result.get("status") == "error":
-                    self._log_execution(
-                        command=command,
-                        intent=plan.get("intent", "task"),
-                        domain=domain,
-                        action=action,
-                        risk=risk,
-                        status="error",
-                        response=result.get("response", "Step failed")
-                    )
-                    
-                    return {
-                        "intent": plan.get("intent", "task"),
-                        "domain": domain,
-                        "action": action,
-                        "risk": risk,
-                        "status": "error",
-                        "response": f"Failed at step {step_num}: {result.get('response', 'Unknown error')}",
-                        "step_results": step_results
-                    }
-                    
-            except Exception as e:
-                error_result = {
-                    "domain": domain,
-                    "action": action,
-                    "risk": risk,
-                    "status": "error",
-                    "response": f"Exception: {str(e)}"
-                }
-                step_results.append(error_result)
-                
-                self._log_execution(
-                    command=command,
-                    intent=plan.get("intent", "task"),
-                    domain=domain,
-                    action=action,
-                    risk=risk,
-                    status="error",
-                    response=error_result["response"]
-                )
-                
-                return {
-                    "intent": plan.get("intent", "task"),
-                    "domain": domain,
-                    "action": action,
-                    "risk": risk,
-                    "status": "error",
-                    "response": f"Failed at step {step_num}: {str(e)}",
-                    "step_results": step_results
-                }
-        
-        # All steps completed
-        final_response = f"Completed {len(steps)} step(s) successfully."
-        
-        self._log_execution(
-            command=command,
-            intent=plan.get("intent", "task"),
-            domain=plan.get("domain", "multi"),
-            action="multi_step",
-            risk=plan.get("risk", "medium"),
-            status="success",
-            response=final_response
-        )
-        
-        return {
-            "intent": plan.get("intent", "task"),
-            "domain": plan.get("domain", "multi"),
-            "action": "multi_step",
-            "risk": plan.get("risk", "medium"),
-            "status": "success",
-            "response": final_response,
-            "step_results": step_results
-        }
-    
-    def _execute_step(self, step):
-        """Execute a single step with tool method verification."""
-        domain = step.get("domain", "unknown")
-        action = step.get("action", "unknown")
-        
-        # Get tool
-        if domain not in self.tools:
-            return {
-                "domain": domain,
-                "action": action,
-                "risk": step.get("risk", "low"),
-                "status": "error",
-                "response": f"Unknown domain: {domain}"
-            }
-        
-        tool = self.tools[domain]
-        
-        # Execute via appropriate method
-        try:
-            # Use execute() method if available (preferred for routing)
-            if hasattr(tool, "execute"):
-                result = tool.execute(action, step.get("parameters", step))
-                
-                # Track file ingestion for PDF
-                if domain == "pdf" and action == "summarize":
-                    self.telemetry.increment("file_ingested", metadata={"type": "pdf"})
-                
-                # Handle different response formats
-                if isinstance(result, dict):
-                    if result.get("status") == "success":
-                        resp_msg = result.get("message", result.get("data", "Completed"))
-                        self._publish_sync(NovaEvent(
-                            source="controller",
-                            type="action_executed",
-                            payload={"tool": domain, "action": action, "result": resp_msg},
-                            priority=2
-                        ))
-                        return {
-                            "domain": domain,
-                            "action": action,
-                            "risk": step.get("risk", "low"),
-                            "status": "success",
-                            "response": resp_msg
-                        }
-                    else:
-                        return {
-                            "domain": domain,
-                            "action": action,
-                            "risk": step.get("risk", "low"),
-                            "status": "error",
-                            "response": result.get("message", "Execution failed")
-                        }
-                else:
-                    self._publish_sync(NovaEvent(
-                        source="controller",
-                        type="action_executed",
-                        payload={"tool": domain, "action": action, "result": str(result)},
-                        priority=2
-                    ))
-                    return {
-                        "domain": domain,
-                        "action": action,
-                        "risk": step.get("risk", "low"),
-                        "status": "success",
-                        "response": str(result)
-                    }
-            
-            # Fallback to direct method calls
-            elif domain == "system":
-                if action == "morning_briefing":
-                    briefing = tool.morning_briefing()
-                    self._publish_sync(NovaEvent(
-                        source="controller",
-                        type="action_executed",
-                        payload={"tool": domain, "action": action, "result": briefing[:100] + "..."},
-                        priority=2
-                    ))
-                    return {
-                        "domain": domain,
-                        "action": action,
-                        "risk": "low",
-                        "status": "success",
-                        "response": briefing
-                    }
-                else:
-                    return {
-                        "domain": domain,
-                        "action": action,
-                        "risk": "low",
-                        "status": "error",
-                        "response": f"Action {action} not implemented"
-                    }
-            
-            else:
-                return {
-                    "domain": domain,
-                    "action": action,
-                    "risk": step.get("risk", "low"),
-                    "status": "error",
-                    "response": f"Tool does not support execute() method"
-                }
-                
-        except AttributeError as e:
-            return {
-                "domain": domain,
-                "action": action,
-                "risk": step.get("risk", "low"),
-                "status": "error",
-                "response": f"Tool method error: {str(e)}"
-            }
-        except Exception as e:
-            return {
-                "domain": domain,
-                "action": action,
-                "risk": step.get("risk", "low"),
-                "status": "error",
-                "response": f"Execution error: {str(e)}"
-            }
-    
-    # ================================================================
-    # SINGLE-STEP EXECUTION
-    # ================================================================
-    
-    def _execute_single_step(self, command, plan):
-        """Execute single-step plan with tool verification."""
-        domain = plan.get("domain", "unknown")
-        action = plan.get("action", "unknown")
-        
-        # Verify tool exists
-        if domain not in self.tools:
-            self._log_execution(
-                command=command,
-                intent=plan.get("intent", "unknown"),
-                domain=domain,
-                action=action,
-                risk="low",
-                status="error",
-                response="Command not recognized."
-            )
-            return {
-                "intent": "unknown",
-                "domain": domain,
-                "action": "none",
-                "risk": "low",
-                "status": "error",
-                "response": "Command not recognized."
-            }
+        return self._fallback_chat(command)
         
         tool = self.tools[domain]
         
@@ -1384,16 +711,9 @@ class Controller:
                     action=action,
                     risk="low",
                     status="error",
-                    response="Command not recognized."
+                    response="Redirected to conversation fallback."
                 )
-                return {
-                    "intent": "unknown",
-                    "domain": domain,
-                    "action": "none",
-                    "risk": "low",
-                    "status": "error",
-                    "response": "Command not recognized."
-                }
+                return self._fallback_chat(command)
                 
         except AttributeError as e:
             self._log_execution(
@@ -1405,14 +725,7 @@ class Controller:
                 status="error",
                 response=f"Tool method error: {str(e)}"
             )
-            return {
-                "intent": "error",
-                "domain": domain,
-                "action": action,
-                "risk": "low",
-                "status": "error",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
         except Exception as e:
             self._log_execution(
                 command=command,
@@ -1423,17 +736,34 @@ class Controller:
                 status="error",
                 response=f"Execution error: {str(e)}"
             )
-            return {
-                "intent": "error",
-                "domain": domain,
-                "action": action,
-                "risk": "low",
-                "status": "error",
-                "response": "Command not recognized."
-            }
+            return self._fallback_chat(command)
     
+
+    def _fallback_chat(self, command: str) -> dict:
+        from llm import generate_summary
+        prompt = f"""You are N.O.V.A, an AI assistant like JARVIS.
+Be precise, efficient, mission-focused.
+Keep responses concise and operational.
+Never say 'Command not recognized'.
+
+User: {command}"""
+        try:
+            resp = generate_summary(prompt)
+        except Exception:
+            resp = "Systems offline."
+        
+        return {
+            "intent": "conversation",
+            "domain": "system",
+            "action": "chat",
+            "risk": "low",
+            "status": "success",
+            "response": resp
+        }
+
     # ================================================================
     # CONFIRMATION WORKFLOW
+
     # ================================================================
     
     def execute_confirmed_action(self, command, result):

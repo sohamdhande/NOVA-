@@ -10,7 +10,7 @@ interface MissionSummary {
     expenses_missing_today: boolean;
     missing_expense_days_count: number;
     daemon_running: boolean;
-    daemon_last_error: string | null;
+    daemon_last_error?: string | null;
 }
 
 export const MissionStatus: React.FC = () => {

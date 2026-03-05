@@ -1,14 +1,55 @@
 import sqlite3
 import os
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, HTTPException, Form
 from core.event_bus import event_bus, NovaEvent
 
 router = APIRouter()
+
+@router.get("/status")
+async def get_status():
+    return {
+        "status": "online",
+        "model": "llama3.2"
+    }
+
+@router.post("/nova/shutdown")
+async def nova_shutdown():
+    try:
+        with open("shutdown.lock", "w") as f:
+            f.write("SHUTDOWN_REQUESTED")
+        return {"status": "shutting_down"}
+    except Exception as e:
+        return {"error": str(e), "status": 500}
+
+@router.get("/files/list")
+async def list_files(path: str = "~/"):
+    try:
+        import os
+        expanded = os.path.expanduser(path)
+        if not os.path.exists(expanded):
+            return {"files": [], "error": "Path not found"}
+        
+        items = []
+        for name in os.listdir(expanded):
+            full_path = os.path.join(expanded, name)
+            is_dir = os.path.isdir(full_path)
+            size_kb = os.path.getsize(full_path) // 1024 if not is_dir else 0
+            items.append({
+                "name": name,
+                "is_dir": is_dir,
+                "size_kb": size_kb,
+                "path": full_path
+            })
+            
+        items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+        return {"files": items}
+    except Exception as e:
+        return {"files": [], "error": str(e)}
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "nova_logs.db")
 
 def _get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     # Create events table if it doesn't exist
     cursor = conn.cursor()
@@ -285,20 +326,120 @@ def toggle_automation(automation_id: str):
 # Terminal
 # ─────────────────────────────────────────
 
-class TerminalCommand(BaseModel):
-    command: str
-
-
-# STUB - replace with real data
 @router.post("/terminal")
-def run_terminal(req: TerminalCommand):
-    return JSONResponse(content={
-        "command": req.command,
-        "output": "total 48\ndrwxr-xr-x  12 user  staff   384 Mar  5 09:00 .\n...",
-        "risk_level": "LOW",
-        "status": "executed",
-        "duration_ms": 42
-    })
+async def terminal_execute(request: Request):
+    body = await request.json()
+    command = body.get("command", "").strip()
+    
+    if not command:
+        return JSONResponse(
+            {"error": "Empty command"}, 
+            status_code=400
+        )
+    
+    WHITELIST = [
+        "ls", "pwd", "echo", "cat", "grep", "find",
+        "ps", "df", "du", "uname", "whoami", "which",
+        "git status", "git log", "git branch", "git diff",
+        "brew list", "brew info", "brew doctor",
+        "pip list", "pip show", "python --version",
+        "node --version", "npm list", "npm --version",
+        "ollama list", "ollama ps",
+        "top -l 1", "uptime", "date", "cal",
+        "open .", "open -a"
+    ]
+    
+    BLOCKED = [
+        "rm -rf /", "format", "mkfs", "dd if=",
+        "chmod 777 /", "sudo rm", "> /dev/sda"
+    ]
+    
+    # Check blocked first
+    if any(command.startswith(b) for b in BLOCKED):
+        return JSONResponse({
+            "status": "blocked",
+            "message": "Command blocked by security policy.",
+            "risk": "CRITICAL",
+            "requires_approval": False,
+            "output": "",
+            "exit_code": -1
+        })
+    
+    # Check whitelist
+    is_whitelisted = any(
+        command.strip().startswith(w) 
+        for w in WHITELIST
+    )
+    
+    if not is_whitelisted:
+        # Publish approval request to event bus
+        from core.event_bus import event_bus, NovaEvent
+        import uuid
+        approval_id = str(uuid.uuid4())[:8]
+        
+        await event_bus.publish(NovaEvent(
+            source="terminal",
+            type="approval_required",
+            payload={
+                "id": approval_id,
+                "command": command,
+                "reason": "Command not in whitelist",
+                "risk": "MEDIUM"
+            },
+            priority=7
+        ))
+        
+        return JSONResponse({
+            "status": "pending_approval",
+            "message": f"Command requires approval. Check Approval Panel.",
+            "risk": "MEDIUM",
+            "requires_approval": True,
+            "approval_id": approval_id,
+            "output": "",
+            "exit_code": -1
+        })
+    
+    # Execute whitelisted command
+    import subprocess
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=os.path.expanduser("~")
+        )
+        output = result.stdout or result.stderr
+        output = output[:3000]
+        
+        return JSONResponse({
+            "status": "executed",
+            "command": command,
+            "output": output,
+            "exit_code": result.returncode,
+            "risk": "LOW",
+            "requires_approval": False,
+            "message": "Command executed."
+        })
+    except subprocess.TimeoutExpired:
+        return JSONResponse({
+            "status": "timeout",
+            "message": "Command timed out after 15s.",
+            "output": "",
+            "exit_code": -1,
+            "risk": "LOW",
+            "requires_approval": False
+        })
+    except Exception as e:
+        return JSONResponse({
+            "status": "error",
+            "message": str(e),
+            "output": "",
+            "exit_code": -1,
+            "risk": "LOW",
+            "requires_approval": False
+        })
 
 
 # ─────────────────────────────────────────
@@ -339,7 +480,7 @@ def get_reasoning():
         ],
         "confidence": 87,
         "last_inference_ms": 1840,
-        "model": "mistral:7b-instruct",
+        "model": "llama3.2",
         "recent_thoughts": [
             "No urgent emails detected.",
             "Task deadline approaching in 2h.",
@@ -541,3 +682,169 @@ def trigger_cleanup():
 @router.post("/nova/biometric-unlock")
 def biometric_unlock():
     return JSONResponse(content={"status": "unlocked", "expires_in_minutes": 30})
+
+@router.post("/chat")
+async def chat(request: Request):
+    body = await request.json()
+    message = body.get("message", "")
+    
+    if not message.strip():
+        return JSONResponse(
+            {"error": "Empty message"}, 
+            status_code=400
+        )
+    
+    from core.intent_parser import intent_parser
+    from core.tool_router import tool_router
+    
+    try:
+        intent = await intent_parser.parse(message)
+        result = await tool_router.route(intent)
+        
+        return JSONResponse({
+            "message": result.output,
+            "intent": result.intent,
+            "block_type": result.block_type,
+            "data": result.data,
+            "requires_approval": result.requires_approval,
+            "risk": result.risk,
+            "success": result.success
+        })
+    except Exception as e:
+        return JSONResponse({
+            "message": f"N.O.V.A encountered an error: {str(e)}",
+            "intent": "error",
+            "block_type": "error",
+            "data": {"error": str(e)},
+            "requires_approval": False,
+            "risk": "LOW",
+            "success": False
+        })
+
+@router.get("/files/autocomplete")
+async def file_autocomplete(q: str = ""):
+    """Return file/folder suggestions for a partial path."""
+    import os, glob
+    
+    if not q:
+        # Return home directory contents
+        q = "~/"
+    
+    expanded = os.path.expanduser(q)
+    
+    try:
+        # Get matches
+        matches = glob.glob(expanded + "*")
+        
+        # Filter out hidden + heavy dirs
+        SKIP = ['node_modules', '.git', '__pycache__', 
+                '.venv', 'venv', '.Trash']
+        
+        results = []
+        for m in matches[:15]:
+            name = os.path.basename(m)
+            if name in SKIP or name.startswith('.'):
+                continue
+            results.append({
+                "path": m.replace(
+                    os.path.expanduser("~"), "~"
+                ),
+                "is_dir": os.path.isdir(m),
+                "name": name
+            })
+        
+        return JSONResponse({"suggestions": results})
+    except Exception as e:
+        return JSONResponse({"suggestions": []})
+
+
+@router.get("/advisories")
+async def get_advisories():
+    """
+    Generate proactive advisories based on system state.
+    Runs deterministically — no LLM needed.
+    """
+    import psutil, os
+    from datetime import datetime
+    
+    advisories = []
+    
+    # Check CPU
+    cpu = psutil.cpu_percent(interval=0.1)
+    if cpu > 85:
+        advisories.append({
+            "id": "cpu_high",
+            "type": "warning",
+            "message": f"CPU usage at {cpu:.0f}%. "
+                      f"Recommend terminating heavy processes.",
+            "action": "show processes",
+            "priority": 8
+        })
+    
+    # Check Memory
+    mem = psutil.virtual_memory()
+    if mem.percent > 85:
+        advisories.append({
+            "id": "mem_high", 
+            "type": "warning",
+            "message": f"Memory pressure at {mem.percent:.0f}%. "
+                      f"System performance degrading.",
+            "action": "check system",
+            "priority": 7
+        })
+    
+    # Check Disk
+    disk = psutil.disk_usage('/')
+    if disk.percent > 80:
+        advisories.append({
+            "id": "disk_high",
+            "type": "warning", 
+            "message": f"Disk at {disk.percent:.0f}%. "
+                      f"Cleanup recommended.",
+            "action": "run cleanup",
+            "priority": 6
+        })
+    
+    # Check Downloads folder
+    downloads = os.path.expanduser("~/Downloads")
+    if os.path.exists(downloads):
+        count = len(os.listdir(downloads))
+        if count > 50:
+            advisories.append({
+                "id": "downloads_full",
+                "type": "info",
+                "message": f"Downloads folder contains "
+                          f"{count} files. Organization suggested.",
+                "action": "clean downloads",
+                "priority": 4
+            })
+    
+    # Check Battery
+    battery = psutil.sensors_battery()
+    if battery and battery.percent < 20 \
+       and not battery.power_plugged:
+        advisories.append({
+            "id": "battery_low",
+            "type": "critical",
+            "message": f"Battery at {battery.percent:.0f}%. "
+                      f"Connect power immediately.",
+            "action": None,
+            "priority": 9
+        })
+    
+    # Time-based advisory (8PM coding reminder)
+    hour = datetime.now().hour
+    if hour >= 20:
+        advisories.append({
+            "id": "evening_check",
+            "type": "info",
+            "message": "Evening check-in. "
+                      "Review today's task completion.",
+            "action": "show tasks",
+            "priority": 3
+        })
+    
+    # Sort by priority
+    advisories.sort(key=lambda x: x["priority"], reverse=True)
+    
+    return JSONResponse({"advisories": advisories[:5]})

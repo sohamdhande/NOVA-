@@ -6,6 +6,19 @@ import { HQPanel } from "../components/panels/HQPanel";
 import { MonitorPanel } from "../components/panels/MonitorPanel";
 import { TasksPanel } from "../components/panels/TasksPanel";
 import { AutomationsPanel } from "../components/panels/AutomationsPanel";
+import { TerminalPanel } from "../components/panels/TerminalPanel";
+
+import { ApprovalsPanel } from "../components/panels/ApprovalsPanel";
+import { CommsPanel } from "../components/panels/CommsPanel";
+import { MemoryPanel } from "../components/panels/MemoryPanel";
+import { ReasoningPanel } from "../components/panels/ReasoningPanel";
+import { ProductivityPanel } from "../components/panels/ProductivityPanel";
+
+import { SkillsPanel } from "../components/panels/SkillsPanel";
+import { FilesPanel } from "../components/panels/FilesPanel";
+import { BrowserPanel } from "../components/panels/BrowserPanel";
+import { SecurityPanel } from "../components/panels/SecurityPanel";
+import { SettingsPanel } from "../components/panels/SettingsPanel";
 
 const PANELS: Record<string, { title: string; description: string; icon: string }> = {
     hq: { title: "COMMAND CENTER", description: "Central HQ overview with live system feed", icon: "⌂" },
@@ -28,9 +41,20 @@ const PANELS: Record<string, { title: string; description: string; icon: string 
 function ActivePanel({ panelKey }: { panelKey: string }) {
     switch (panelKey) {
         case "hq": return <HQPanel />;
+        case "terminal": return <TerminalPanel />;
         case "monitor": return <MonitorPanel />;
         case "tasks": return <TasksPanel />;
         case "automations": return <AutomationsPanel />;
+        case "approvals": return <ApprovalsPanel />;
+        case "comms": return <CommsPanel />;
+        case "memory": return <MemoryPanel />;
+        case "reasoning": return <ReasoningPanel />;
+        case "productivity": return <ProductivityPanel />;
+        case "skills": return <SkillsPanel />;
+        case "files": return <FilesPanel />;
+        case "browser": return <BrowserPanel />;
+        case "security": return <SecurityPanel />;
+        case "settings": return <SettingsPanel />;
         default: {
             const panel = PANELS[panelKey] ?? PANELS.hq;
             return <PlaceholderPanel title={panel.title} description={panel.description} icon={panel.icon} />;

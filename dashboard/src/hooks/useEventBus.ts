@@ -13,7 +13,6 @@ export function useEventBus() {
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
     const [connected, setConnected] = useState(false);
     const [lastEvent, setLastEvent] = useState<NovaEvent | null>(null);
-    const storeRef = useRef(useNovaStore.getState());
 
     useEffect(() => {
         let alive = true;

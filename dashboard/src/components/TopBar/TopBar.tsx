@@ -7,6 +7,23 @@ export function TopBar() {
     const { token, timeRemaining } = useAuth();
     const { metrics, setMetrics, systemStatus, setSystemStatus, setAutonomy } = useNovaStore();
     const [sessionSec, setSessionSec] = useState(timeRemaining());
+    const [model, setModel] = useState<string>("loading...");
+
+    // Fetch model status
+    useEffect(() => {
+        const fetchStatus = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/status`, {
+                    headers: token ? { "Authorization": `Bearer ${token}` } : {},
+                });
+                if (res.ok) {
+                    const d = await res.json();
+                    setModel(d.model || "llama3.2");
+                }
+            } catch { /* ignore */ }
+        };
+        fetchStatus();
+    }, [token]);
 
     // Refresh session timer every second
     useEffect(() => {
@@ -88,7 +105,7 @@ export function TopBar() {
                 <span className="text-[var(--nova-border)]">│</span>
                 <span className="text-[var(--nova-muted)]">MODE API_SERVER</span>
                 <span className="text-[var(--nova-border)]">│</span>
-                <span className="text-[var(--nova-muted)]">MODEL mistral:7b</span>
+                <span className="text-[var(--nova-muted)]">MODEL {model}</span>
             </div>
 
             {/* Right */}

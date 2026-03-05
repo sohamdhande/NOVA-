@@ -14,6 +14,50 @@ async def start_system():
     print("  N.O.V.A System Boot Sequence")
     print("="*50)
 
+    # 0. Database Schema
+    try:
+        def ensure_tables():
+            import sqlite3
+            db_path = os.path.join(os.path.dirname(__file__), "nova_logs.db")
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id TEXT PRIMARY KEY,
+                description TEXT,
+                status TEXT DEFAULT 'active',
+                deadline DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+            
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                id TEXT PRIMARY KEY,
+                granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME,
+                granted_by TEXT DEFAULT 'biometric'
+            );
+            """)
+            
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id TEXT PRIMARY KEY,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                event_type TEXT,
+                payload JSON,
+                importance INTEGER DEFAULT 1
+            );
+            """)
+            
+            conn.commit()
+            conn.close()
+
+        ensure_tables()
+        print("[NOVA] ✓ Database schema verified")
+    except Exception as e:
+        print(f"[NOVA] ✗ Database initialization failed: {e}")
+
     # 1. Encryption
     try:
         from core.encryption import encryption

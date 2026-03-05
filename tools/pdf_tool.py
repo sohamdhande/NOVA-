@@ -4,7 +4,7 @@ import fitz  # PyMuPDF
 
 # Ollama configuration (same as main LLM module)
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "mistral:7b-instruct"
+MODEL = "llama3.2"
 
 
 class PDFTool:

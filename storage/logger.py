@@ -11,7 +11,7 @@ class ExecutionLogger:
 
     def __init__(self):
         """Initialize database connection and create table if needed."""
-        self.conn = sqlite3.connect(DB_PATH)
+        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         # Harden concurrency
         self.conn.execute("PRAGMA journal_mode=WAL;")
         self.conn.execute("PRAGMA busy_timeout=5000;")
