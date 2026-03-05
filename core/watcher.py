@@ -10,12 +10,19 @@ from storage.logger import ExecutionLogger
 from core.telemetry import TelemetryLogger
 
 class InboxWatcher:
-    def __init__(self, inbox_dir="inbox", processed_dir="processed", queue_file="queue/pending.json"):
+
+    def __init__(self, memory_tool, notion_tool, pdf_tool, inbox_dir="inbox", processed_dir="processed", queue_file="queue/pending.json"):
         self.base_dir = os.path.dirname(os.path.dirname(__file__))
         self.inbox_path = os.path.join(self.base_dir, inbox_dir)
         self.processed_path = os.path.join(self.base_dir, processed_dir)
         self.queue_file = os.path.join(self.base_dir, queue_file)
         self.logger = ExecutionLogger()
+        
+        # Dependency Injection
+        self.memory_tool = memory_tool
+        self.notion_tool = notion_tool
+        self.pdf_tool = pdf_tool
+        
         self._ensure_dirs()
 
     def _ensure_dirs(self):
@@ -35,9 +42,10 @@ class InboxWatcher:
         """
         files = [f for f in os.listdir(self.inbox_path) if not f.startswith('.')]
         if not files:
-            return "Inbox is empty."
+            return {"status": "empty", "message": "Inbox is empty.", "processed_files": []}
         
         results = []
+        processed_files = []
         for filename in files:
             file_path = os.path.join(self.inbox_path, filename)
             if os.path.isdir(file_path):
@@ -58,10 +66,16 @@ class InboxWatcher:
                 telemetry.increment("file_ingested", metadata={"filename": filename})
                 # -----------------
                 
+                processed_files.append({"filename": filename, "status": "success"})
             except Exception as e:
                 results.append(f"  -> Error: {str(e)}")
+                processed_files.append({"filename": filename, "status": "error", "error": str(e)})
         
-        return "\n".join(results)
+        return {
+            "status": "processed",
+            "message": "\n".join(results),
+            "processed_files": processed_files
+        }
 
     def _process_file(self, filename, file_path, safe_mode):
         ext = os.path.splitext(filename)[1].lower()
@@ -85,8 +99,8 @@ class InboxWatcher:
         if action == "summarize_document":
             print(f"  [Summarizing] {filename}...")
             if ext == ".pdf":
-                tool = PDFTool()
-                result = tool.execute(file_path)
+                # Use injected tool
+                result = self.pdf_tool.execute(file_path)
                 if result["status"] == "success":
                     summary_text = result["summary"]
                 else:
@@ -121,10 +135,10 @@ class InboxWatcher:
                             json.dump(queue, f, indent=2)
                     else:
                         print(f"  [Notion] Creating task...")
-                        notion = NotionTool()
+                        # Use injected tool
                         data = next_plan.get("data", {})
                         # Map to NotionTool expected params
-                        notion.create_task(title=data.get("title", filename))
+                        self.notion_tool.create_task(title=data.get("title", filename))
                     
                     # Also store memory? Memory is safe? Yes, mostly read-heavy later.
                     # But per requirements: "Not auto-confirm high-risk mutations."
@@ -133,8 +147,8 @@ class InboxWatcher:
                     # Let's assume memory store is safe enough for daemon.
                     
                     print(f"  [Memory] Storing entry...")
-                    memory = MemoryTool()
-                    memory.store_entry({"data": {
+                    # Use injected tool
+                    self.memory_tool.store_entry({"data": {
                         "source_type": "file",
                         "title": data.get("title", filename),
                         "summary": data.get("content_summary", summary_text),
@@ -143,6 +157,6 @@ class InboxWatcher:
 
                 elif next_action == "store_memory_entry":
                      print(f"  [Memory] Storing entry...")
-                     memory = MemoryTool()
-                     memory.execute("store_entry", next_plan)
+                     # Use injected tool
+                     self.memory_tool.execute("store_entry", next_plan)
 

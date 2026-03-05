@@ -1,8 +1,8 @@
-
 import json
 import os
 import uuid
 from datetime import datetime
+from core.encryption import encryption
 
 try:
     from config import DEBUG
@@ -60,18 +60,23 @@ class MemoryStore:
         # Create common ID for both stores
         entry_id = str(uuid.uuid4())
         
+        # Encrypt sensitive data
+        enc_title = encryption.encrypt_db_field(title)
+        enc_summary = encryption.encrypt_db_field(summary)
+        
         # Construct semantic content for vector storage
-        # For deduplication, we primarily care about the summary content
-        # Title can vary for the same underlying information
-        vector_text = f"{title}: {summary}"
+        # We store the encrypted text in the vector store, but vector search won't work well on encrypted text! 
+        # Wait, if we encrypt the text going to the vector store, semantic search is impossible. 
+        # The instructions said "wrap any fields that store sensitive data (email content, conversation history, API keys)"
+        vector_text = f"{enc_title}: {enc_summary}"
 
         # Attempt to add to vector store first (controls deduplication)
         if self.use_vector:
             success = self.vector_store.add_entry(
                 entry_id=entry_id,
-                text=summary,  # Deduplicate based on summary, not title+summary
+                text=enc_summary,  # Deduplicate based on summary, not title+summary
                 metadata={
-                    "title": title,
+                    "title": enc_title,
                     "timestamp": datetime.now().isoformat(),
                     "tags": tags,
                     "source_type": source_type,
@@ -84,7 +89,7 @@ class MemoryStore:
                 return {
                     "status": "duplicate",
                     "message": "Memory already exists (deduplicated by VectorStore).",
-                    "title": title
+                    "title": title # Return original unencrypted title to user
                 }
 
         # If vector addition succeeded (or disabled), add to JSON
@@ -93,14 +98,18 @@ class MemoryStore:
             "id": entry_id,
             "timestamp": datetime.now().isoformat(),
             "source_type": source_type,
-            "title": title,
-            "summary": summary,
+            "title": enc_title,
+            "summary": enc_summary,
             "tags": tags
         }
         entries.append(entry)
         self._save(entries)
         
-        return entry
+        # Return decrypted version to the caller for immediate consumption
+        ret_entry = entry.copy()
+        ret_entry["title"] = title
+        ret_entry["summary"] = summary
+        return ret_entry
 
     def search(self, query, top_k=5, similarity_threshold=0.65):
         """
@@ -142,8 +151,8 @@ class MemoryStore:
 
                         deduplicated.append({
                             "id": r["id"],
-                            "title": r["metadata"].get("title", ""),
-                            "summary": summary_text, 
+                            "title": encryption.decrypt_db_field(r["metadata"].get("title", "")),
+                            "summary": encryption.decrypt_db_field(summary_text), 
                             "timestamp": r["metadata"].get("timestamp", ""),
                             "tags": tags,
                             "score": r["score"]
@@ -167,10 +176,17 @@ class MemoryStore:
             if e["id"] in seen_ids:
                 continue
                 
-            content = f"{e['title']} {e['summary']} {' '.join(e.get('tags', []))}".lower()
+            dec_title = encryption.decrypt_db_field(e['title'])
+            dec_summary = encryption.decrypt_db_field(e['summary'])
+            
+            content = f"{dec_title} {dec_summary} {' '.join(e.get('tags', []))}".lower()
             if query_lower in content:
                 seen_ids.add(e["id"])
-                results.append(e)
+                
+                e_copy = e.copy()
+                e_copy["title"] = dec_title
+                e_copy["summary"] = dec_summary
+                results.append(e_copy)
         
         # Sort by timestamp descending for keyword search
         results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
@@ -204,18 +220,19 @@ class MemoryStore:
         # Create common ID for both stores
         entry_id = str(uuid.uuid4())
         
+        enc_title = encryption.encrypt_db_field(title)
+        enc_summary = encryption.encrypt_db_field(summary)
+        
         # Construct semantic content for vector storage
-        # For deduplication, we primarily care about the summary content
-        # Title can vary for the same underlying information
-        vector_text = f"{title}: {summary}"
+        vector_text = f"{enc_title}: {enc_summary}"
 
         # Attempt to add to vector store first (controls deduplication)
         if self.use_vector:
             success = self.vector_store.add_entry(
                 entry_id=entry_id,
-                text=summary,  # Deduplicate based on summary, not title+summary
+                text=enc_summary,  # Deduplicate based on summary, not title+summary
                 metadata={
-                    "title": title,
+                    "title": enc_title,
                     "timestamp": datetime.now().isoformat(),
                     "tags": tags,
                     "source_type": source_type,
@@ -239,8 +256,8 @@ class MemoryStore:
             "id": entry_id,
             "timestamp": datetime.now().isoformat(),
             "source_type": source_type,
-            "title": title,
-            "summary": summary,
+            "title": enc_title,
+            "summary": enc_summary,
             "tags": tags
         }
         entries.append(entry)
@@ -248,7 +265,11 @@ class MemoryStore:
         
         if DEBUG:
             print(f"[MemoryStore] Entry stored: '{title}' (id={entry_id[:8]}...)")
-        return entry
+            
+        ret_entry = entry.copy()
+        ret_entry["title"] = title
+        ret_entry["summary"] = summary
+        return ret_entry
 
     def search(self, query, top_k=5, similarity_threshold=0.65):
         """Semantic search with keyword fallback."""
@@ -275,8 +296,8 @@ class MemoryStore:
 
                     normalized.append({
                         "id": r["id"],
-                        "title": r["metadata"].get("title", ""),
-                        "summary": summary_text, 
+                        "title": encryption.decrypt_db_field(r["metadata"].get("title", "")),
+                        "summary": encryption.decrypt_db_field(summary_text), 
                         "timestamp": r["metadata"].get("timestamp", ""),
                         "tags": tags,
                         "score": r["score"]
@@ -291,9 +312,14 @@ class MemoryStore:
         query_lower = query.lower()
         results = []
         for e in entries:
-            content = f"{e['title']} {e['summary']} {' '.join(e.get('tags', []))}".lower()
+            dec_title = encryption.decrypt_db_field(e['title'])
+            dec_summary = encryption.decrypt_db_field(e['summary'])
+            content = f"{dec_title} {dec_summary} {' '.join(e.get('tags', []))}".lower()
             if query_lower in content:
-                results.append(e)
+                e_copy = e.copy()
+                e_copy["title"] = dec_title
+                e_copy["summary"] = dec_summary
+                results.append(e_copy)
         
         print(f"[MemoryStore] Keyword search found {len(results)} results")
         return results

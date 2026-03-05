@@ -43,7 +43,16 @@ pip install -r requirements.txt
 
 ### Run NOVA
 
+### Run NOVA
+
+**Option 1: Helper Script (Recommended)**
 ```bash
+./run_nova.sh
+```
+
+**Option 2: Manual**
+```bash
+source venv/bin/activate
 python3 nova.py
 ```
 

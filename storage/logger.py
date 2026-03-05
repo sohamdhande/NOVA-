@@ -12,6 +12,10 @@ class ExecutionLogger:
     def __init__(self):
         """Initialize database connection and create table if needed."""
         self.conn = sqlite3.connect(DB_PATH)
+        # Harden concurrency
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA busy_timeout=5000;")
+        print(f"[SQLite] WAL mode enabled for ExecutionLogger")
         self._create_table()
 
     def _create_table(self):

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 NOVA - Autonomous Productivity Operator
 Production-grade application container with persistent lifecycle.
@@ -8,6 +7,7 @@ import json
 import subprocess
 import os
 import sys
+from datetime import datetime
 from typing import Optional
 
 # Import all subsystems
@@ -22,6 +22,7 @@ from tools.calendar_tool import CalendarTool
 from tools.notion_tool import NotionTool
 from tools.pdf_tool import PDFTool
 from core.system_tool import SystemTool
+from core.priority_engine import PriorityEngine
 
 
 class NovaApp:
@@ -81,6 +82,15 @@ class NovaApp:
             pdf_tool=self.pdf_tool,
             system_tool=self.system_tool
         )
+
+        # Priority Engine
+        print("[8/8] Initializing Priority Engine...")
+        self.priority_engine = PriorityEngine()
+
+        # Expense Manager
+        print("[9/9] Initializing Expense Manager...")
+        from core.expense import ExpenseManager
+        self.expense_manager = ExpenseManager()
         
         print("\n" + "=" * 60)
         print("  ✓ NOVA online. All subsystems ready.")
@@ -140,7 +150,11 @@ class NovaApp:
     def start_daemon(self):
         """Start background daemon mode."""
         from core.daemon import NovaDaemon
-        daemon = NovaDaemon()
+        daemon = NovaDaemon(
+            memory_tool=self.memory_tool,
+            notion_tool=self.notion_tool,
+            pdf_tool=self.pdf_tool
+        )
         daemon.run()
     
     def process_queue(self):
@@ -264,6 +278,10 @@ class NovaApp:
                     self.process_queue()
                     continue
                 
+                if command.lower() == "show priorities":
+                    self.show_priorities()
+                    continue
+                
                 if command.lower() in ("exit", "quit"):
                     print("\nNOVA offline.")
                     break
@@ -302,6 +320,67 @@ class NovaApp:
             import traceback
             traceback.print_exc()
             sys.exit(1)
+
+    def show_priorities(self):
+        """Fetch tasks, calculate priorities, and display."""
+        print("\n[NOVA] Fetching active tasks from Notion...")
+        
+        # 1. Fetch tasks
+        # Use existing notion_tool to get tasks
+        # We need a method that gets tasks. read_open_tasks returns a dict with 'data' list.
+        response = self.notion_tool.read_open_tasks(limit=50)
+        if response.get("status") != "success":
+            print(f"Error fetching tasks: {response.get('message')}")
+            return
+            
+        tasks = response.get("data", [])
+        if not tasks:
+            print("No active tasks found.")
+            return
+
+        print(f"[NOVA] analyzing {len(tasks)} tasks...")
+
+        # 2. Process with Priority Engine
+        # TODO: Retrieve actual operational mode from SystemTool or Config
+        context = {
+            "goal_weight": 1, # Default weight
+            "mode": "normal"
+        }
+        
+        start_t = datetime.now()
+        prioritized = self.priority_engine.process_tasks(tasks, context=context)
+        end_t = datetime.now()
+        
+        # 3. Display
+        print("\n" + "=" * 80)
+        print(f"  PRIORITY QUEUE ({len(prioritized)} tasks) - Calculated in {(end_t - start_t).total_seconds():.3f}s")
+        print("=" * 80)
+        print(f"{'SCORE':<8} | {'DUE DATE':<12} | {'TASK TITLE':<40} | {'TOP FACTOR'}")
+        print("-" * 80)
+        
+        for task in prioritized[:15]: # Show top 15
+            score = task['computed_score']
+            title = task['title'][:38] + ".." if len(task['title']) > 38 else task['title']
+            
+            # Format due date
+            due = "No Date"
+            if task.get("due_date"):
+                # Simplify for display
+                try:
+                    dt = datetime.fromisoformat(task.get("due_date").replace('Z', '+00:00'))
+                    due = dt.strftime("%Y-%m-%d")
+                except:
+                    due = "Invalid"
+            
+            # Top breakdown factor
+            breakdown = task.get("breakdown", [])
+            top_factor = breakdown[0] if breakdown else ""
+            
+            print(f"{score:<8} | {due:<12} | {title:<40} | {top_factor}")
+            
+        if len(prioritized) > 15:
+            print(f"... and {len(prioritized) - 15} more.")
+        print("-" * 80 + "\n")
 
 
 def speak(text):

@@ -1,0 +1,13 @@
+:root {
+  --nova-bg:        #020d0d;
+  --nova-surface:   #0a1a1a;
+  --nova-surface2:  #0f2020;
+  --nova-border:    rgba(0, 255, 204, 0.12);
+  --nova-accent:    #00ffcc;
+  --nova-amber:     #f59e0b;
+  --nova-red:       #ef4444;
+  --nova-green:     #10b981;
+  --nova-text:      #e2e8f0;
+  --nova-muted:     #4a6a6a;
+  --nova-glow:      0 0 20px rgba(0, 255, 204, 0.15);
+}

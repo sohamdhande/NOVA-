@@ -8,9 +8,11 @@ Enforces:
 - Multi-step execution
 - Zero hallucination tolerance
 """
-
 import re
 import string
+import asyncio
+from core.event_bus import event_bus, NovaEvent
+from core.biometric import biometric_auth
 try:
     import config
 except ImportError:
@@ -73,6 +75,88 @@ class Controller:
         }
         
         self._pending_confirmations = {}
+        
+        # Subscribe to Event Bus
+        event_bus.subscribe("email_received", self._on_email_received)
+        event_bus.subscribe("telemetry_synced", self._on_telemetry_synced)
+        event_bus.subscribe("daemon_started", self._on_daemon_started)
+        event_bus.subscribe("action_approved", self._on_action_approved)
+
+    # ================================================================
+    # EVENT HANDLERS
+    # ================================================================
+
+    async def _on_email_received(self, event: NovaEvent):
+        """React to incoming email events from the daemon."""
+        subject = event.payload.get("subject", "Unknown")
+        sender = event.payload.get("sender", "Unknown")
+        preview = event.payload.get("preview", "")
+        # Log receipt
+        print(f"[NOVA CONTROLLER] Email event received: '{subject}' from {sender}")
+        # If priority is high (>=7), trigger a summarization command automatically
+        if event.priority >= 7:
+            # Handle synchronously if handle_command isn't async, or via to_thread
+            if asyncio.iscoroutinefunction(self.handle_command):
+                await self.handle_command(f"summarize email from {sender}: {preview}")
+            else:
+                self.handle_command(f"summarize email from {sender}: {preview}")
+
+    async def _on_telemetry_synced(self, event: NovaEvent):
+        """React to telemetry sync events."""
+        snapshot = event.payload.get("snapshot", {})
+        print(f"[NOVA CONTROLLER] Telemetry synced: {snapshot}")
+
+    async def _on_daemon_started(self, event: NovaEvent):
+        """React to daemon start event."""
+        print(f"[NOVA CONTROLLER] Daemon started at {event.payload.get('timestamp')}")
+
+    async def _on_action_approved(self, event: NovaEvent):
+        """React to user approving a high risk action via Dashboard queue."""
+        action_id = event.payload.get("id")
+        self._log_execution(
+            command=f"Approval processed for action_id={action_id}",
+            intent="system",
+            domain="system",
+            action="approve",
+            risk="low",
+            status="success",
+            response=f"Manual execution trigger accepted for {action_id}"
+        )
+        
+        # We need to retrieve the action details from the SQLite events table
+        import sqlite3, os, json
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "nova_logs.db")
+        try:
+            # Running this blocking DB fetch via to_thread since we are in async context
+            def fetch_cmd():
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("SELECT * FROM events WHERE id=?", (action_id,)).fetchone()
+                conn.close()
+                return row
+                
+            row = await asyncio.to_thread(fetch_cmd)
+            
+            if row:
+                payload = json.loads(row["payload"])
+                cmd = payload.get("command")
+                if cmd:
+                    # Reroute it but whitelist it from requiring TouchID again
+                    self._pending_confirmations[cmd] = True
+                    # Let handle_command trigger normally
+                    await asyncio.to_thread(self.handle_command, cmd)
+                    
+        except Exception as e:
+            print(f"[NOVA CONTROLLER] Error executing approved action: {e}")
+
+    def _publish_sync(self, event: NovaEvent):
+        """Helper to publish events from synchronous methods."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(event_bus.publish(event))
+        except RuntimeError:
+            # If no running loop in context, we start a throwaway one
+            asyncio.run(event_bus.publish(event))
     
     def handle_command(self, command):
         """
@@ -795,19 +879,41 @@ class Controller:
             
             # High-risk confirmation
             if risk == "high" and plan.get("requires_confirmation", False):
-                return {
-                    "intent": plan.get("intent", "task"),
-                    "domain": domain,
-                    "action": action,
-                    "risk": risk,
-                    "status": "pending_confirmation",
-                    "requires_confirmation": True,
-                    "confirm_type": "multi_step",
-                    "response": f"About to execute: {step.get('description', action)}",
-                    "step_results": step_results,
-                    "remaining_steps": steps[i:],
-                    "current_step_index": i
-                }
+                self._publish_sync(NovaEvent(
+                    source="controller",
+                    type="approval_required",
+                    payload={
+                        "command": command,
+                        "reason": f"High risk action detected: {action} on {domain}. Requires manual oversight."
+                    },
+                    priority=8
+                ))
+                
+                # Check if this precise command was just manually approved via the queue
+                if command in self._pending_confirmations and self._pending_confirmations[command]:
+                    authorized = True
+                    # Consume the approval so it cannot be reused
+                    self._pending_confirmations.pop(command)
+                else:
+                    try:
+                        # Check if we are already inside a running loop (like FastAPI)
+                        loop = asyncio.get_running_loop()
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+                            # Call async from sync thread
+                            authorized = pool.submit(
+                                asyncio.run, 
+                                biometric_auth.require_auth(action_name=action, risk_level=risk)
+                            ).result()
+                    except RuntimeError:
+                        # Simple sync call
+                        authorized = asyncio.run(biometric_auth.require_auth(
+                            action_name=action,
+                            risk_level=risk
+                        ))
+                
+                if not authorized:
+                    return {"status": "blocked", "reason": "Authorization denied"}
             
             # Mutation detection
             is_mutation = action in ("create", "update", "delete", "schedule", "send", "modify", "create_event", "create_task", "update_event", "update_task", "delete_event", "delete_task")
@@ -969,12 +1075,19 @@ class Controller:
                 # Handle different response formats
                 if isinstance(result, dict):
                     if result.get("status") == "success":
+                        resp_msg = result.get("message", result.get("data", "Completed"))
+                        self._publish_sync(NovaEvent(
+                            source="controller",
+                            type="action_executed",
+                            payload={"tool": domain, "action": action, "result": resp_msg},
+                            priority=2
+                        ))
                         return {
                             "domain": domain,
                             "action": action,
                             "risk": step.get("risk", "low"),
                             "status": "success",
-                            "response": result.get("message", result.get("data", "Completed"))
+                            "response": resp_msg
                         }
                     else:
                         return {
@@ -985,6 +1098,12 @@ class Controller:
                             "response": result.get("message", "Execution failed")
                         }
                 else:
+                    self._publish_sync(NovaEvent(
+                        source="controller",
+                        type="action_executed",
+                        payload={"tool": domain, "action": action, "result": str(result)},
+                        priority=2
+                    ))
                     return {
                         "domain": domain,
                         "action": action,
@@ -997,6 +1116,12 @@ class Controller:
             elif domain == "system":
                 if action == "morning_briefing":
                     briefing = tool.morning_briefing()
+                    self._publish_sync(NovaEvent(
+                        source="controller",
+                        type="action_executed",
+                        payload={"tool": domain, "action": action, "result": briefing[:100] + "..."},
+                        priority=2
+                    ))
                     return {
                         "domain": domain,
                         "action": action,
@@ -1086,6 +1211,12 @@ class Controller:
                 else:
                     summary = tool.summarize(file_path)
                     self.telemetry.increment("file_ingested", metadata={"type": "pdf"})
+                    self._publish_sync(NovaEvent(
+                        source="controller",
+                        type="action_executed",
+                        payload={"tool": domain, "action": action, "result": "PDF summarized successfully."},
+                        priority=2
+                    ))
                     result = {
                         "intent": "task",
                         "domain": "pdf",
@@ -1120,6 +1251,12 @@ class Controller:
                         }
                     else:
                         response = "Found events:\n" + "\n".join([f"- {e}" for e in events])
+                        self._publish_sync(NovaEvent(
+                            source="controller",
+                            type="action_executed",
+                            payload={"tool": domain, "action": action, "result": f"Found {len(events)} events."},
+                            priority=2
+                        ))
                         result = {
                             "intent": plan.get("intent", "unknown"),
                             "domain": "calendar",
@@ -1164,6 +1301,12 @@ class Controller:
                         }
                     else:
                         response = "Found open tasks:\n" + "\n".join([f"- {t}" for t in tasks])
+                        self._publish_sync(NovaEvent(
+                            source="controller",
+                            type="action_executed",
+                            payload={"tool": domain, "action": action, "result": f"Found {len(tasks)} tasks."},
+                            priority=2
+                        ))
                         result = {
                             "intent": plan.get("intent", "unknown"),
                             "domain": "notion",
@@ -1197,6 +1340,12 @@ class Controller:
             elif domain == "system":
                 if action == "morning_briefing":
                     briefing = tool.morning_briefing()
+                    self._publish_sync(NovaEvent(
+                        source="controller",
+                        type="action_executed",
+                        payload={"tool": domain, "action": action, "result": briefing[:100] + "..."},
+                        priority=2
+                    ))
                     result = {
                         "intent": plan.get("intent", "unknown"),
                         "domain": "system",

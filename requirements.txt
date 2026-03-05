@@ -1,3 +1,11 @@
 requests
-chromadb
+pydantic<2.0.0
+chromadb==0.4.24
 sentence-transformers
+notion-client
+fastapi<0.100.0
+uvicorn
+google-auth
+google-auth-oauthlib
+google-api-python-client
+bcrypt

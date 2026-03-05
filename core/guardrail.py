@@ -19,6 +19,10 @@ LIMITS = {
 class MutationGuardrail:
     def __init__(self):
         self.conn = sqlite3.connect(DB_PATH)
+        # Harden concurrency
+        self.conn.execute("PRAGMA journal_mode=WAL;")
+        self.conn.execute("PRAGMA busy_timeout=5000;")
+        print(f"[SQLite] WAL mode enabled for MutationGuardrail")
         self._create_table()
 
     def _create_table(self):

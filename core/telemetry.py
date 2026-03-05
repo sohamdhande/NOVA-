@@ -12,6 +12,10 @@ class TelemetryLogger:
         """Initialize connection to telemetry table."""
         try:
             self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            # Harden concurrency
+            self.conn.execute("PRAGMA journal_mode=WAL;")
+            self.conn.execute("PRAGMA busy_timeout=5000;")
+            print(f"[SQLite] WAL mode enabled for TelemetryLogger")
             self._create_table()
         except Exception as e:
             print(f"Telemetry Init Error: {e}")

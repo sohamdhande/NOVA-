@@ -112,11 +112,24 @@ class NotionTool:
                         select_obj = status_prop.get("select")
                         if select_obj:
                             status = select_obj.get("name", "No status")
+                            
+                # Extract Due Date
+                due_date = None
+                date_prop = props.get("Date") or props.get("Due") or props.get("Deadline")
+                if date_prop:
+                    date_obj = date_prop.get("date")
+                    if date_obj:
+                        due_date = date_obj.get("start")
+                
+                # Extract Created Time
+                created_time = page.get("created_time")
 
                 tasks.append({
                     "id": page["id"],
                     "title": title,
                     "status": status,
+                    "due_date": due_date,
+                    "created_time": created_time,
                     "url": page.get("url")
                 })
             except Exception as e:
