@@ -224,12 +224,7 @@ class ExpenseEntry(BaseModel):
 
 # --- Dashboard Endpoints ---
 
-@app.get("/api/briefing")
-def get_briefing():
-    """Get structured morning briefing."""
-    if not daemon or not daemon.briefing:
-        return {"error": "Daemon not ready"}
-    return daemon.briefing.get_briefing_data()
+# Briefing is now handled in api/routes.py
 
 @app.get("/api/tasks")
 def get_tasks():

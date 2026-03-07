@@ -3,6 +3,8 @@ import os
 import json
 from fastapi import APIRouter, Request, HTTPException, Form
 from core.event_bus import event_bus, NovaEvent
+from core.security_officer import security_officer
+from datetime import datetime
 
 router = APIRouter()
 
@@ -84,30 +86,32 @@ event_bus.subscribe("approval_required", _on_approval_required)
 
 @router.get("/approvals")
 def get_approvals():
-    conn = _get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM events WHERE type='approval_required' AND status='pending'")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    approvals = []
-    for r in rows:
-        payload = {}
+    conn = sqlite3.connect("nova_logs.db", check_same_thread=False)
+    rows = conn.execute("""
+        SELECT id, timestamp, payload 
+        FROM events 
+        WHERE type = 'approval_required'
+        ORDER BY timestamp DESC 
+        LIMIT 20
+    """).fetchall()
+
+    items = []
+    for row in rows:
         try:
-            payload = json.loads(r["payload"]) if r["payload"] else {}
+            payload = json.loads(row[2]) if isinstance(row[2], str) else row[2]
+            items.append({
+                "id": payload.get("id", row[0]),
+                "command": payload.get("command", payload.get("action", "Unknown")),
+                "risk": payload.get("risk", "MEDIUM"),
+                "reason": payload.get("reason", "Requires authorization"),
+                "source": payload.get("source", "system"),
+                "timestamp": row[1],
+                "status": "pending"
+            })
         except:
             pass
-            
-        approvals.append({
-            "id": r["id"],
-            "source": r["source"],
-            "type": r["type"],
-            "payload": payload,
-            "priority": r["priority"],
-            "timestamp": r["timestamp"],
-            "status": r["status"]
-        })
-    return approvals
+
+    return JSONResponse({"approvals": items})
 
 @router.post("/approvals/{event_id}/approve")
 async def approve_action(event_id: int):
@@ -156,6 +160,122 @@ from datetime import datetime
 import asyncio as _asyncio
 import json as _json
 
+@router.get("/health")
+async def get_health():
+    import psutil
+    
+    # Calculate real health score
+    cpu = psutil.cpu_percent(interval=0.1)
+    mem = psutil.virtual_memory().percent
+    disk = psutil.disk_usage('/').percent
+    battery = psutil.sensors_battery()
+    bat = battery.percent if battery else 100
+    
+    # Score: start at 100, deduct for bad metrics
+    score = 100
+    if cpu > 80: score -= 20
+    elif cpu > 60: score -= 10
+    if mem > 80: score -= 20
+    elif mem > 60: score -= 10
+    if disk > 90: score -= 20
+    elif disk > 70: score -= 10
+    if bat < 20: score -= 15
+    elif bat < 40: score -= 5
+    score = max(0, min(100, score))
+    
+    # Zone
+    if score >= 80: zone = "STABLE"
+    elif score >= 60: zone = "CONTROLLED"
+    elif score >= 40: zone = "ELEVATED"
+    else: zone = "CRITICAL"
+    
+    # Advisories based on metrics
+    advisories = []
+    if cpu > 80:
+        advisories.append(f"CPU at {cpu:.0f}% — performance degraded")
+    if mem > 80:
+        advisories.append(f"Memory pressure at {mem:.0f}%")
+    if disk > 80:
+        advisories.append(f"Disk at {disk:.0f}% — cleanup recommended")
+    
+    return JSONResponse({
+        "score": score,
+        "zone": zone,
+        "cpu": cpu,
+        "memory": mem,
+        "disk": disk,
+        "battery": bat,
+        "advisories": advisories
+    })
+
+@router.get("/briefing")
+async def get_briefing():
+    import psutil
+    from datetime import datetime
+    
+    now = datetime.now()
+    hour = now.hour
+    
+    items = []
+    
+    # System status item
+    cpu = psutil.cpu_percent(interval=0.1)
+    mem = psutil.virtual_memory().percent
+    items.append({
+        "id": "sys",
+        "type": "info",
+        "severity": "low",
+        "message": f"System nominal. CPU {cpu:.0f}%, RAM {mem:.0f}%."
+    })
+    
+    # Downloads check
+    import os
+    downloads = os.path.expanduser("~/Downloads")
+    if os.path.exists(downloads):
+        count = len(os.listdir(downloads))
+        if count > 30:
+            items.append({
+                "id": "dl",
+                "type": "warning", 
+                "severity": "medium",
+                "message": f"Downloads folder has {count} files. Organization recommended."
+            })
+    
+    # Task check from SQLite
+    try:
+        conn = sqlite3.connect("nova_logs.db", check_same_thread=False)
+        task_count = conn.execute(
+            "SELECT COUNT(*) FROM goals WHERE status='active'"
+        ).fetchone()[0]
+        if task_count > 0:
+            items.append({
+                "id": "tasks",
+                "type": "info",
+                "severity": "low", 
+                "message": f"{task_count} active tasks in queue. Review recommended."
+            })
+    except:
+        pass
+    
+    # Time-based greeting
+    if 6 <= hour < 12:
+        greeting = "Good morning."
+    elif 12 <= hour < 17:
+        greeting = "Good afternoon."
+    else:
+        greeting = "Good evening."
+        
+    items.insert(0, {
+        "id": "greeting",
+        "type": "info",
+        "severity": "low",
+        "message": f"{greeting} N.O.V.A systems online. {now.strftime('%A, %B %d')}."
+    })
+    
+    return JSONResponse({
+        "briefing": items,
+        "generated_at": now.isoformat()
+    })
 
 # ─────────────────────────────────────────
 # WebSocket Event Stream (stub)
@@ -175,7 +295,7 @@ async def ws_events(websocket: WebSocket):
                 "payload": {},
                 "priority": 0
             }))
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, _asyncio.CancelledError):
         pass
     except Exception:
         pass
@@ -595,6 +715,24 @@ def install_skill(req: SkillInstall):
 # ─────────────────────────────────────────
 
 # STUB - replace with real data
+@router.post("/security/scan")
+async def run_security_scan():
+    try:
+        result = await security_officer.deep_scan_with_ai()
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(content={
+            "threat_score": 0,
+            "processes_checked": 0,
+            "suspicious_files": 0,
+            "open_ports": 0,
+            "vulnerabilities": 0,
+            "findings": [f"Scan error: {str(e)}"],
+            "ai_analysis": "Scan failed.",
+            "scanned_at": datetime.now().isoformat()
+        })
+
+# STUB - replace with real data
 @router.get("/security")
 def get_security():
     return JSONResponse(content={
@@ -699,10 +837,60 @@ async def chat(request: Request):
     
     try:
         intent = await intent_parser.parse(message)
+        
+        from core.memory_engine import memory_engine
+        
+        # Inject memory into conversation intents
+        if intent.tool == "llm":
+            intent.params["memory_context"] = \
+                memory_engine.get_context_summary()
+        
+        
+        # Safety override — catch document requests
+        # that slip through
+        msg_l = message.lower()
+        if any(p in msg_l for p in [
+            "word doc", "word document", ".docx",
+            "as a doc", "as a document"
+        ]) and intent.tool != "documents":
+            intent.intent = "create_docx"
+            intent.tool = "documents"
+            intent.params = {"instruction": message}
+            print(f"[CHAT] Override → documents/create_docx")
+
+        if any(p in msg_l for p in [
+            "spreadsheet", "excel", ".xlsx"
+        ]) and intent.tool != "documents":
+            intent.intent = "create_xlsx"
+            intent.tool = "documents"
+            intent.params = {"instruction": message}
+
+        if any(p in msg_l for p in [
+            "presentation", "powerpoint", "slides",
+            ".pptx"
+        ]) and intent.tool != "documents":
+            intent.intent = "create_pptx"
+            intent.tool = "documents"
+            intent.params = {"instruction": message}
+            
+        print(f"[CHAT] Message: '{message}'")
+        print(f"[CHAT] Tool: {intent.tool}")
+        print(f"[CHAT] Params: {intent.params}")
+        
         result = await tool_router.route(intent)
         
+        # Auto-save important facts from conversation
+        memory_engine.save_conversation_summary([
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": 
+             str(result.output)}
+        ])
+        
+        print(f"[Chat] Sending output: "
+              f"{result.output[:200] if result.output else 'EMPTY'}")
+        
         return JSONResponse({
-            "message": result.output,
+            "message": str(result.output),
             "intent": result.intent,
             "block_type": result.block_type,
             "data": result.data,
@@ -848,3 +1036,282 @@ async def get_advisories():
     advisories.sort(key=lambda x: x["priority"], reverse=True)
     
     return JSONResponse({"advisories": advisories[:5]})
+
+@router.post("/nova/execute")
+async def execute_task(request: Request):
+    """
+    Execute a natural language task autonomously.
+    N.O.V.A will plan and execute it step by step.
+    """
+    body = await request.json()
+    instruction = body.get("instruction", "")
+    
+    if not instruction.strip():
+        return JSONResponse(
+            {"error": "No instruction provided"},
+            status_code=400
+        )
+    
+    from core.task_planner import task_planner
+    import asyncio
+    
+    # Generate plan
+    task = await task_planner.plan(instruction)
+    
+    # Execute in background
+    asyncio.create_task(
+        task_planner.execute(task)
+    )
+    
+    return JSONResponse({
+        "task_id": task.id,
+        "title": task.title,
+        "steps": [{
+            "id": s.id,
+            "index": s.index,
+            "description": s.description,
+            "action_type": s.action_type,
+            "risk": s.risk,
+            "status": s.status.value
+        } for s in task.steps],
+        "status": task.status.value,
+        "message": f"Task queued. "
+                  f"{len(task.steps)} steps planned."
+    })
+
+from fastapi.responses import StreamingResponse
+import asyncio, json
+
+@router.get("/nova/tasks/stream")
+async def stream_task_progress():
+    """
+    SSE endpoint — streams live task progress
+    to the dashboard frontend.
+    """
+    async def event_generator():
+        from core.task_planner import task_planner
+        
+        while True:
+            tasks = task_planner.get_active_tasks()
+            
+            data = {
+                "timestamp": 
+                    datetime.now().isoformat(),
+                "active_count": len(tasks),
+                "tasks": [{
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status.value,
+                    "progress": t.progress,
+                    "current_step": 
+                        t.current_step_index,
+                    "total_steps": len(t.steps),
+                    "current_step_name": (
+                        t.steps[
+                            t.current_step_index
+                        ].description
+                        if t.steps and 
+                        t.current_step_index < 
+                        len(t.steps)
+                        else ""
+                    )
+                } for t in tasks]
+            }
+            
+            yield f"data: {json.dumps(data)}\n\n"
+            await asyncio.sleep(1)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+@router.get("/nova/tasks/active")
+async def get_active_tasks():
+    """Get all currently running tasks."""
+    from core.task_planner import task_planner
+    
+    tasks = task_planner.get_active_tasks()
+    return JSONResponse({
+        "tasks": [{
+            "id": t.id,
+            "title": t.title,
+            "status": t.status.value,
+            "progress": t.progress,
+            "current_step": t.current_step_index,
+            "total_steps": len(t.steps),
+            "steps": [{
+                "description": s.description,
+                "status": s.status.value,
+                "result": s.result
+            } for s in t.steps]
+        } for t in tasks]
+    })
+
+@router.get("/nova/tasks/history")
+async def get_task_history():
+    """Get completed task history."""
+    from core.task_planner import task_planner
+    
+    history = task_planner.get_history()
+    return JSONResponse({
+        "history": [{
+            "id": t.id,
+            "title": t.title,
+            "status": t.status.value,
+            "steps_count": len(t.steps),
+            "result": t.result_summary,
+            "completed_at": t.completed_at.isoformat()
+                if t.completed_at else None
+        } for t in history]
+    })
+
+@router.post("/nova/tasks/{task_id}/pause")
+async def pause_task(task_id: str):
+    from core.task_planner import task_planner
+    task_planner.pause()
+    return JSONResponse({"status": "paused"})
+
+@router.post("/nova/tasks/{task_id}/resume")
+async def resume_task(task_id: str):
+    from core.task_planner import task_planner
+    task_planner.resume()
+    return JSONResponse({"status": "resumed"})
+
+@router.get("/voice/status")
+async def voice_status():
+    try:
+        from core.voice_daemon import voice_daemon
+        from core.voice import voice
+        return JSONResponse({
+            "active": voice_daemon.is_active,
+            "wake_word": voice.config.wake_word,
+            "tts_voice": voice.config.tts_voice,
+            "stt_model": voice.config.whisper_model,
+            "recent_commands": 
+                voice_daemon.get_command_log()[-5:]
+        })
+    except Exception as e:
+        return JSONResponse({
+            "active": False,
+            "error": str(e)
+        })
+
+@router.post("/voice/speak")
+async def voice_speak(request: Request):
+    """Make N.O.V.A speak a message."""
+    body = await request.json()
+    text = body.get("text", "")
+    if not text:
+        return JSONResponse(
+            {"error": "No text"}, 
+            status_code=400
+        )
+    try:
+        from core.voice import voice
+        import threading
+        threading.Thread(
+            target=voice.speak,
+            args=(text,),
+            daemon=True
+        ).start()
+        return JSONResponse({
+            "status": "speaking",
+            "text": text
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+@router.post("/voice/toggle")
+async def voice_toggle():
+    """Start or stop voice listening."""
+    try:
+        from core.voice_daemon import voice_daemon
+        import threading
+        if voice_daemon.is_active:
+            voice_daemon.stop()
+            return JSONResponse({
+                "status": "stopped"
+            })
+        else:
+            threading.Thread(
+                target=voice_daemon.start,
+                daemon=True
+            ).start()
+            return JSONResponse({
+                "status": "started"
+            })
+    except Exception as e:
+        return JSONResponse({"error": str(e)})
+
+from core.security_officer import security_officer
+
+# Security endpoints
+
+@router.get("/api/security/summary")
+async def get_security_summary():
+    return security_officer.get_security_summary()
+
+@router.get("/api/security/events")
+async def get_security_events(limit: int = 20):
+    return {
+        "events": security_officer
+            .get_recent_events(limit)
+    }
+
+@router.post("/api/security/scan")
+async def run_security_scan():
+    result = security_officer.full_scan()
+    return {"result": result}
+
+@router.post("/api/security/scan/downloads")
+async def scan_downloads():
+    result = security_officer.scan_downloads()
+    return {"result": result}
+
+@router.post("/api/security/scan/file")
+async def scan_file(body: dict):
+    path = body.get("path", "")
+    result = security_officer.scan_file(path)
+    return result
+
+@router.post("/api/security/scan/processes")
+async def scan_processes():
+    return security_officer.scan_processes()
+
+@router.post("/api/security/scan/network")
+async def scan_network():
+    return security_officer.scan_network()
+
+@router.post("/api/security/kill/{pid}")
+async def kill_process(pid: int):
+    result = security_officer.kill_process(pid)
+    return {"result": result}
+
+@router.post("/api/security/quarantine")
+async def quarantine_file(body: dict):
+    path = body.get("path", "")
+    result = security_officer.quarantine_file(path)
+    return {"result": result}
+
+@router.post("/api/security/secure-mode")
+async def toggle_secure_mode(body: dict):
+    enable = body.get("enable", True)
+    if enable:
+        result = security_officer.enable_secure_mode()
+    else:
+        result = security_officer.disable_secure_mode()
+    return {"result": result}
+
+@router.get("/api/security/vulnerabilities")
+async def scan_vulnerabilities():
+    result = security_officer.scan_vulnerabilities()
+    return {"result": result}
+
+@router.get("/api/security/privacy")
+async def check_privacy():
+    return security_officer.check_privacy()

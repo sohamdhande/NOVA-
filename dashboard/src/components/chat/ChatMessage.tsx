@@ -5,6 +5,7 @@ import { TasksBlock } from './blocks/TasksBlock';
 import { MissionBlock } from './blocks/MissionBlock';
 import { ApprovalBlock } from './blocks/ApprovalBlock';
 import { ErrorBlock } from './blocks/ErrorBlock';
+import ReactMarkdown from 'react-markdown';
 
 export interface NovaMessage {
     id: string;
@@ -60,7 +61,33 @@ export function ChatMessage({
                     <TasksBlock data={message.data} />
                 )}
                 {message.block_type === 'mission' && (
-                    <MissionBlock data={message.data} />
+                    <>
+                        <MissionBlock data={message.data} />
+                        {message.content && 
+                         message.content.length > 20 && (
+                            <div className="px-3 py-2 
+                              rounded bg-[#0a1a1a] 
+                              border border-[rgba(0,255,204,0.15)] 
+                              text-[#e2e8f0] font-mono 
+                              text-sm mt-2 prose prose-invert prose-sm max-w-none">
+                                <ReactMarkdown
+                                    components={{
+                                        h1: ({children}) => <h1 className="text-[#00ffcc] text-base font-bold mb-2">{children}</h1>,
+                                        h2: ({children}) => <h2 className="text-[#00ffcc] text-sm font-bold mb-1 mt-2">{children}</h2>,
+                                        h3: ({children}) => <h3 className="text-[#00ddaa] text-sm font-semibold mb-1">{children}</h3>,
+                                        strong: ({children}) => <strong className="text-[#00ffcc] font-bold">{children}</strong>,
+                                        p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
+                                        ul: ({children}) => <ul className="list-none mb-2 space-y-1">{children}</ul>,
+                                        li: ({children}) => <li className="flex gap-2"><span className="text-[#00ffcc]">▸</span><span>{children}</span></li>,
+                                        code: ({children}) => <code className="bg-[#001a1a] text-[#00ffcc] px-1 rounded text-xs">{children}</code>,
+                                        hr: () => <hr className="border-[rgba(0,255,204,0.2)] my-2" />,
+                                    }}
+                                >
+                                    {message.content}
+                                </ReactMarkdown>
+                            </div>
+                        )}
+                    </>
                 )}
                 {(message.block_type === 'approval' || message.requires_approval) && (
                     <ApprovalBlock
@@ -78,8 +105,22 @@ export function ChatMessage({
                 )}
                 {(message.block_type === 'text' || message.block_type === 'navigation' || !message.block_type) &&
                     !message.requires_approval && message.success !== false && (
-                        <div className="px-3 py-2 rounded bg-[#0a1a1a] border border-[rgba(0,255,204,0.15)] text-[#e2e8f0] font-mono text-sm whitespace-pre-wrap">
-                            {message.content}
+                        <div className="px-3 py-2 rounded bg-[#0a1a1a] border border-[rgba(0,255,204,0.15)] text-[#e2e8f0] font-mono text-sm mt-2 prose prose-invert prose-sm max-w-none">
+                            <ReactMarkdown
+                                components={{
+                                    h1: ({children}) => <h1 className="text-[#00ffcc] text-base font-bold mb-2">{children}</h1>,
+                                    h2: ({children}) => <h2 className="text-[#00ffcc] text-sm font-bold mb-1 mt-2">{children}</h2>,
+                                    h3: ({children}) => <h3 className="text-[#00ddaa] text-sm font-semibold mb-1">{children}</h3>,
+                                    strong: ({children}) => <strong className="text-[#00ffcc] font-bold">{children}</strong>,
+                                    p: ({children}) => <p className="mb-2 leading-relaxed">{children}</p>,
+                                    ul: ({children}) => <ul className="list-none mb-2 space-y-1">{children}</ul>,
+                                    li: ({children}) => <li className="flex gap-2"><span className="text-[#00ffcc]">▸</span><span>{children}</span></li>,
+                                    code: ({children}) => <code className="bg-[#001a1a] text-[#00ffcc] px-1 rounded text-xs">{children}</code>,
+                                    hr: () => <hr className="border-[rgba(0,255,204,0.2)] my-2" />,
+                                }}
+                            >
+                                {message.content}
+                            </ReactMarkdown>
                         </div>
                     )}
 

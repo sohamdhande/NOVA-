@@ -5,7 +5,7 @@ import { PlaceholderPanel } from "../components/panels/PlaceholderPanel";
 import { HQPanel } from "../components/panels/HQPanel";
 import { MonitorPanel } from "../components/panels/MonitorPanel";
 import { TasksPanel } from "../components/panels/TasksPanel";
-import { AutomationsPanel } from "../components/panels/AutomationsPanel";
+import { AutoTaskPanel } from "../components/panels/AutoTaskPanel";
 import { TerminalPanel } from "../components/panels/TerminalPanel";
 
 import { ApprovalsPanel } from "../components/panels/ApprovalsPanel";
@@ -44,7 +44,7 @@ function ActivePanel({ panelKey }: { panelKey: string }) {
         case "terminal": return <TerminalPanel />;
         case "monitor": return <MonitorPanel />;
         case "tasks": return <TasksPanel />;
-        case "automations": return <AutomationsPanel />;
+        case "automations": return <AutoTaskPanel />;
         case "approvals": return <ApprovalsPanel />;
         case "comms": return <CommsPanel />;
         case "memory": return <MemoryPanel />;

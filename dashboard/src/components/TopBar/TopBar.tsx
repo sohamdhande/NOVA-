@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useNovaStore } from "../../store/novaStore";
 import { API_BASE } from "../../api";
+import { useApi } from "../../hooks/useApi";
 
 export function TopBar() {
+    const api = useApi();
     const { token, timeRemaining } = useAuth();
     const { metrics, setMetrics, systemStatus, setSystemStatus, setAutonomy } = useNovaStore();
     const [sessionSec, setSessionSec] = useState(timeRemaining());
     const [model, setModel] = useState<string>("loading...");
+    const [voiceActive, setVoiceActive] = useState(false);
 
     // Fetch model status
     useEffect(() => {
@@ -54,6 +57,19 @@ export function TopBar() {
         const iv = setInterval(fetchMetrics, 5000);
         return () => clearInterval(iv);
     }, [setMetrics, token]);
+
+    // Poll voice status
+    useEffect(() => {
+        const fetchVoice = async () => {
+            try {
+                const res: any = await api.get('/api/voice/status');
+                setVoiceActive(res.active);
+            } catch { /* ignore */ }
+        };
+        fetchVoice();
+        const iv = setInterval(fetchVoice, 5000);
+        return () => clearInterval(iv);
+    }, [api]);
 
     const sessionMin = Math.floor(sessionSec / 60);
     const sessionColor = sessionSec < 300 ? "text-[var(--nova-amber)]" : "text-[var(--nova-muted)]";
@@ -127,6 +143,30 @@ export function TopBar() {
                 <span className={`text-[10px] font-mono tracking-wider ${sessionColor}`}>
                     SESSION {sessionMin}m
                 </span>
+
+                <span className="text-[var(--nova-border)]">│</span>
+
+                {/* Voice Toggle */}
+                <button
+                    onClick={async () => {
+                        await api.post('/api/voice/toggle', {});
+                        setVoiceActive(v => !v);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1
+                        rounded border font-mono text-xs transition-all
+                        ${voiceActive
+                            ? 'border-cyan-400 text-cyan-400 bg-cyan-950'
+                            : 'border-[rgba(255,255,255,0.15)] text-[#4a6a6a]'
+                        }`}
+                    title={voiceActive
+                        ? 'Voice active — say "Nova"'
+                        : 'Voice inactive'}
+                >
+                    <span className={voiceActive ? 'animate-pulse' : ''}>
+                        🎤
+                    </span>
+                    <span>{voiceActive ? 'VOICE ON' : 'VOICE OFF'}</span>
+                </button>
 
                 <span className="text-[var(--nova-border)]">│</span>
 

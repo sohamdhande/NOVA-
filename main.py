@@ -74,6 +74,14 @@ async def start_system():
     except Exception as e:
         print(f"[NOVA] ✗ Event Bus failed: {e}")
 
+    # Start task scheduler
+    try:
+        from core.scheduler import scheduler
+        scheduler.start()
+        print("[NOVA] ✓ Task Scheduler running")
+    except Exception as e:
+        print(f"[NOVA] ✗ Scheduler failed: {e}")
+
     # 3. System Optimizer
     try:
         from core.system_optimizer import system_optimizer
@@ -89,12 +97,32 @@ async def start_system():
     except Exception as e:
         print(f"[NOVA] ✗ Biometric Auth failed: {e}")
 
+    # Cowork Engines
+    try:
+        from core.memory_engine import memory_engine
+        print("[NOVA] ✓ Memory Engine ready")
+    except Exception as e:
+        print(f"[NOVA] ✗ Memory Engine failed: {e}")
+
+    try:
+        from core.skill_engine import skill_engine
+        print("[NOVA] ✓ Skill Engine ready")
+    except Exception as e:
+        print(f"[NOVA] ✗ Skill Engine failed: {e}")
+
     # 5. Browser
     try:
         from integrations.browser import browser
         print("[NOVA] ✓ Browser ready (lazy launch)")
     except Exception as e:
         print(f"[NOVA] ✗ Browser failed: {e}")
+
+    try:
+        from core.security_officer import security_officer
+        security_officer.start_monitoring()
+        print("[NOVA] ✓ Security Officer active")
+    except Exception as e:
+        print(f"[NOVA] ✗ Security failed: {e}")
 
     # 6. Controller (Part of NovaApp)
     try:
@@ -165,6 +193,19 @@ async def start_system():
             print("[NOVA] ✓ Daemon running")
     except Exception as e:
         print(f"[NOVA] ✗ Daemon failed: {e}")
+
+    # Start voice interface
+    try:
+        from core.voice_daemon import voice_daemon
+        import threading
+        voice_thread = threading.Thread(
+            target=voice_daemon.start,
+            daemon=True
+        )
+        voice_thread.start()
+        print("[NOVA] Voice interface starting...")
+    except Exception as e:
+        print(f"[NOVA] Voice unavailable: {e}")
 
     # 8. API Server
     print("[NOVA] ✓ API Server live on localhost:8000")
