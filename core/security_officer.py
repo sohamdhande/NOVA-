@@ -187,8 +187,8 @@ class SecurityOfficer:
                         "New Launch Service Detected",
                         f"New service: {svc.strip()}"
                     )
-        except:
-            pass
+        except (OSError, PermissionError) as e:
+            print(f"[Security] Launch service check failed: {e}")
         
         # Check for new applications
         try:
@@ -202,8 +202,8 @@ class SecurityOfficer:
                         "detail": app,
                         "severity": "LOW"
                     })
-        except:
-            pass
+        except (OSError, PermissionError) as e:
+            print(f"[Security] Application check failed: {e}")
         
         # Check SIP status
         try:
@@ -222,8 +222,8 @@ class SecurityOfficer:
                     "SIP Disabled",
                     "System Integrity Protection is disabled — system vulnerable"
                 )
-        except:
-            pass
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[Security] SIP status check failed: {e}")
         
         return {
             "status": "checked",
@@ -298,15 +298,15 @@ class SecurityOfficer:
                     result["warnings"].append("Potential keylogger detected")
                     result["severity"] = "CRITICAL"
                     result["safe"] = False
-        except:
-            pass
+        except (OSError, PermissionError) as e:
+            print(f"[Security] File content scan failed: {e}")
         
         # Compute hash
         try:
             h = hashlib.sha256(open(expanded, 'rb').read()).hexdigest()
             result["sha256"] = h[:16] + "..."
-        except:
-            pass
+        except (OSError, PermissionError) as e:
+            print(f"[Security] Hash computation failed: {e}")
         
         if not result["safe"]:
             self._log_event(
@@ -442,7 +442,7 @@ class SecurityOfficer:
         ]):
             try:
                 procs.append(proc.info)
-            except:
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
                 pass
         
         return sorted(
@@ -466,7 +466,7 @@ class SecurityOfficer:
                         try:
                             proc = psutil.Process(conn.pid)
                             proc_name = proc.name()
-                        except:
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
                             pass
                         
                         remote = str(conn.raddr.ip)
@@ -493,7 +493,7 @@ class SecurityOfficer:
                                 "Suspicious Port Connection",
                                 f"{proc_name} → {remote}:{port}"
                             )
-                except:
+                except (OSError, AttributeError) as e:
                     pass
         except Exception as e:
             pass
@@ -523,8 +523,8 @@ class SecurityOfficer:
                 results.append(f"Outdated Homebrew packages ({len(packages)}):")
                 for p in packages[:5]:
                     results.append(f"  • {p}")
-        except:
-            pass
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[Security] Homebrew outdated check failed: {e}")
         
         # Check pip outdated
         try:
@@ -539,8 +539,8 @@ class SecurityOfficer:
                     results.append(f"\nOutdated pip packages ({len(lines)}):")
                     for l in lines[:5]:
                         results.append(f"  • {l}")
-        except:
-            pass
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[Security] Pip outdated check failed: {e}")
         
         # Check macOS updates
         try:
@@ -551,8 +551,8 @@ class SecurityOfficer:
             )
             if "recommended" in result.stdout.lower():
                 results.append("\n⚠ macOS updates available")
-        except:
-            pass
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[Security] macOS update check failed: {e}")
         
         if not results:
             return "Vulnerability scan complete. No issues found. ✓"
@@ -588,8 +588,8 @@ class SecurityOfficer:
                         name = service.replace("kTCCService", "")
                         results[name] = [r[0] for r in rows]
                 conn.close()
-            except:
-                pass
+            except (OSError, PermissionError) as e:
+                print(f"[Security] TCC database read failed: {e}")
         
         # Check clipboard access
         result = subprocess.run(
@@ -676,7 +676,7 @@ class SecurityOfficer:
     
     async def deep_scan_with_ai(self) -> dict:
         """Full Mac scan with AI threat analysis."""
-        import httpx, os, stat
+        import os, stat
         from datetime import datetime
         
         print("[Security] Starting deep AI scan...")
@@ -795,7 +795,7 @@ class SecurityOfficer:
                                      stat.S_IXGRP | 
                                      stat.S_IXOTH)
                                 )
-                            except:
+                            except (OSError, PermissionError):
                                 is_exec = False
                             
                             # Check file content for 
@@ -830,7 +830,7 @@ class SecurityOfficer:
                                             'disown',
                                         ]
                                     )
-                                except:
+                                except (OSError, PermissionError):
                                     pass
                             
                             indicator_count = sum([
@@ -933,7 +933,7 @@ class SecurityOfficer:
                                 f" {plist}"
                             )
                             threat_score += 2
-                except:
+                except (OSError, PermissionError):
                     pass
         
         # ── 5. AI ANALYSIS ───────────────────────────
@@ -950,22 +950,20 @@ class SecurityOfficer:
                 + f"\nProcesses: {proc_count}"
             )
             try:
-                async with httpx.AsyncClient() as c:
-                    r = await c.post(
-                        "http://localhost:11434"
-                        "/api/generate",
-                        json={
-                            "model": "llama3.2",
-                            "prompt": prompt,
-                            "stream": False
-                        },
-                        timeout=30
+                from llm import _chat
+                ai_analysis = _chat(
+                    system="You are a Mac security analyst.",
+                    user=(
+                        f"Analyze these security findings "
+                        f"and give a 3-sentence threat "
+                        f"assessment:\n\n"
+                        + "\n".join(findings[:15])
+                        + f"\n\nThreat score: {threat_score}/100"
+                        + f"\nFiles scanned: {file_count}"
+                        + f"\nProcesses: {proc_count}"
                     )
-                    ai_analysis = r.json().get(
-                        "response", 
-                        "Analysis unavailable."
-                    )
-            except:
+                )
+            except Exception:
                 ai_analysis = (
                     "AI analysis unavailable. "
                     "Review findings manually."
@@ -1028,7 +1026,7 @@ class SecurityOfficer:
                 if cpu > 90:
                     score += 20
                     reasons.append(f"High CPU: {proc.info['name']}")
-            except:
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
         
         # Check recent events

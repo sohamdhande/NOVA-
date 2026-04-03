@@ -192,6 +192,8 @@ class Controller:
         except ImportError as e:
             return self._fallback_chat(command)
         
+        parsed = generate_plan(command)
+        
         if not parsed:
             self.telemetry.increment("planner_failed")
             return self._fallback_chat(command)

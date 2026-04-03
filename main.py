@@ -5,6 +5,12 @@ import uvicorn
 import os
 import sys
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Suppress Uvicorn's verbose startup logs to keep our summary clean
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -197,7 +203,6 @@ async def start_system():
     # Start voice interface
     try:
         from core.voice_daemon import voice_daemon
-        import threading
         voice_thread = threading.Thread(
             target=voice_daemon.start,
             daemon=True

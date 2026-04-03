@@ -6,8 +6,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-# OAuth scope — full calendar access
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+# OAuth scope — full calendar access and Gmail access
+SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.modify"
+]
 
 # Credential file paths (project root)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))

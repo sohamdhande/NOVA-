@@ -1,10 +1,59 @@
-import requests
 import json
+import os
+from datetime import datetime
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.2"
+from groq import Groq, APIError, RateLimitError, APIStatusError
 
-SYSTEM_PROMPT = """
+# ---------------------------------------------------------------------------
+# Client setup — primary + fallback
+# ---------------------------------------------------------------------------
+
+_primary = Groq(api_key=os.getenv("GROQ_API_KEY_PRIMARY"))
+_fallback = Groq(api_key=os.getenv("GROQ_API_KEY_FALLBACK"))
+
+MODEL_LARGE = os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile")   # planning, briefing
+MODEL_FAST  = os.getenv("GROQ_MODEL_FAST",  "llama-3.1-8b-instant")      # memory, correction, subtasks
+
+
+def _chat(
+    system: str,
+    user: str,
+    *,
+    model: str = MODEL_LARGE,
+    temperature: float = 0.2,
+    json_mode: bool = False,
+) -> str:
+    """
+    Core completion call with automatic primary → fallback failover.
+    Returns the raw content string.
+    """
+    kwargs: dict = {
+        "model": model,
+        "temperature": temperature,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+    }
+    if json_mode:
+        kwargs["response_format"] = {"type": "json_object"}
+
+    for client in (_primary, _fallback):
+        try:
+            response = client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content
+        except (RateLimitError, APIError, APIStatusError) as e:
+            if client is _primary:
+                print(f"[llm] Primary key failed ({type(e).__name__}), switching to fallback...")
+                continue
+            raise   # fallback also failed — let caller handle it
+
+
+# ===========================================================================
+# SYSTEM PROMPTS  (unchanged from original)
+# ===========================================================================
+
+_PLAN_SYSTEM = """
 You are NOVA's Task & Scheduling Orchestrator.
 
 Your job is to convert user requests into structured execution plans
@@ -248,26 +297,7 @@ No partial state.
 No runtime information.
 """
 
-
-def generate_plan(user_input):
-    prompt = SYSTEM_PROMPT + f"\nUser Command: {user_input}\n"
-
-    payload = {
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.2
-        }
-    }
-
-    response = requests.post(OLLAMA_URL, json=payload)
-    data = response.json()
-
-    return data["response"]
-
-
-BRIEFING_TEMPLATE = """You are NOVA.
+_BRIEFING_SYSTEM = """You are NOVA.
 
 Generate a factual morning briefing using ONLY the data provided.
 
@@ -305,90 +335,9 @@ Conflicts:
 - State clearly if none.
 - If events overlap, mention conflict.
 
-Only output the briefing. No extra commentary.
+Only output the briefing. No extra commentary."""
 
----------------------------------------
-CURRENT DATE:
-{current_date}
-
-CALENDAR EVENTS:
-{calendar_events}
-
-OPEN TASKS:
-{open_tasks}
-
----------------------------------------"""
-
-
-def generate_summary(context):
-    """Turn structured context dict into a natural-language morning briefing.
-
-    Args:
-        context: dict with keys 'events' (list or None) and 'tasks' (list or None).
-
-    Returns:
-        str: A concise, executive-grade briefing string.
-    """
-    from datetime import datetime
-
-    date_str = datetime.now().strftime("%A, %B %d, %Y")
-
-    # Format events block
-    events = context.get("events")
-    if events:
-        events_block = "\n".join(
-            f"  {e['title']} — {e['start']}" for e in events
-        )
-    else:
-        events_block = "  No events scheduled."
-
-    # Format tasks block
-    tasks = context.get("tasks")
-    if tasks:
-        tasks_block = "\n".join(
-            f"  [{t['status']}] {t['title']}" for t in tasks
-        )
-    else:
-        tasks_block = "  No open tasks."
-
-    prompt = BRIEFING_TEMPLATE.format(
-        current_date=date_str,
-        calendar_events=events_block,
-        open_tasks=tasks_block
-    )
-
-    try:
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3
-            }
-        }
-
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
-        data = response.json()
-        return data["response"].strip()
-
-    except Exception:
-        # Deterministic fallback when LLM is unreachable
-        parts = [f"Briefing for {date_str}."]
-        if events:
-            names = ", ".join(e["title"] for e in events)
-            parts.append(f"Today's schedule: {names}.")
-        else:
-            parts.append("Calendar is clear.")
-        if tasks:
-            names = ", ".join(t["title"] for t in tasks[:5])
-            parts.append(f"Open tasks: {names}.")
-        else:
-            parts.append("No pending tasks.")
-        return " ".join(parts)
-
-# --- PLAN CORRECTION ENGINE ---
-
-CORRECTION_PROMPT = """You are the Plan Correction Engine.
+_CORRECTION_SYSTEM = """You are the Plan Correction Engine.
 Your goal is to fix JSON plans that failed validation using MINIMAL changes.
 
 INPUT:
@@ -412,30 +361,9 @@ EXAMPLE:
 
 Error: "Missing top-level key: steps"
 Input: {"domain": "calendar", "action": "read"}
-Output: {"intent": "read", "steps": [{"domain": "calendar", "action": "read_today", "risk": "low"}]}
-"""
+Output: {"intent": "read", "steps": [{"domain": "calendar", "action": "read_today", "risk": "low"}]}"""
 
-def correct_plan(invalid_plan, errors):
-    """Attempt to fix an invalid plan using LLM."""
-    prompt = CORRECTION_PROMPT + f"\nINVALID PLAN:\n{json.dumps(invalid_plan)}\n\nERRORS:\n{json.dumps(errors)}\n"
-    
-    try:
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.1},
-            "format": "json"
-        }
-        response = requests.post(OLLAMA_URL, json=payload)
-        return response.json()["response"]
-    except:
-        return {"status": "uncorrectable"}
-
-
-# --- MEMORY AGENT ---
-
-MEMORY_PROMPT = """You are the Memory Agent.
+_MEMORY_SYSTEM = """You are the Memory Agent.
 Your job is to detect if the user wants to STORE, RECALL, or SEARCH information in long-term memory.
 
 ACTIONS:
@@ -489,35 +417,10 @@ User: "Memory"
 Output: {"action": "none"}
 
 User: "Schedule a meeting"
-Output: {"action": "none"}
-"""
+Output: {"action": "none"}"""
 
-def analyze_memory_intent(user_input):
-    """Determine if input is memory-related."""
-    prompt = MEMORY_PROMPT + f"\nUser Input: {user_input}\n"
-    try:
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.1},
-            "format": "json"
-        }
-        res = requests.post(OLLAMA_URL, json=payload)
-        return json.loads(res.json()["response"])
-    except:
-        return {"action": "none"}
-
-
-# --- FOLDER WATCHER ---
-
-FOLDER_WATCHER_PROMPT = """You are the Folder Watcher Agent.
+_FOLDER_SYSTEM = """You are the Folder Watcher Agent.
 Analyze the file context and decide what to do with it.
-
-CONTEXT:
-File Name: {file_name}
-File Type: {file_type}
-Extracted Text (if any): {extracted_text}
 
 AVAILABLE ACTIONS:
 - summarize_document (if file is PDF/TXT and needs reading)
@@ -533,21 +436,151 @@ OUTPUT JSON:
     "content_summary": "...",
     "tags": [...]
   }
-}
-"""
+}"""
 
-def analyze_file_action(context):
-    """Determine action for a new file."""
-    prompt = FOLDER_WATCHER_PROMPT.format(**context)
+_SUBTASK_SYSTEM = """You are a task decomposition engine.
+Break the given task into 3 to 6 concrete, actionable subtasks.
+Each subtask must be a single clear action.
+Return ONLY a JSON array of strings. No explanation. No markdown.
+Example: ["Research options", "Draft outline", "Review with team"]"""
+
+
+# ===========================================================================
+# PUBLIC API  (same signatures as original)
+# ===========================================================================
+
+def generate_plan(user_input: str) -> str:
+    """Convert a natural-language command into a JSON execution plan."""
+    return _chat(
+        system=_PLAN_SYSTEM,
+        user=f"User Command: {user_input}",
+        model=MODEL_LARGE,
+        temperature=0.2,
+        json_mode=True,
+    )
+
+
+def generate_summary(context: dict) -> str:
+    """Turn structured context dict into a natural-language morning briefing."""
+    date_str = datetime.now().strftime("%A, %B %d, %Y")
+
+    events = context.get("events")
+    events_block = (
+        "\n".join(f"  {e['title']} — {e['start']}" for e in events)
+        if events else "  No events scheduled."
+    )
+
+    tasks = context.get("tasks")
+    tasks_block = (
+        "\n".join(f"  [{t['status']}] {t['title']}" for t in tasks)
+        if tasks else "  No open tasks."
+    )
+
+    user_msg = (
+        f"CURRENT DATE:\n{date_str}\n\n"
+        f"CALENDAR EVENTS:\n{events_block}\n\n"
+        f"OPEN TASKS:\n{tasks_block}"
+    )
+
     try:
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.1},
-            "format": "json"
-        }
-        res = requests.post(OLLAMA_URL, json=payload)
-        return json.loads(res.json()["response"])
-    except:
+        return _chat(
+            system=_BRIEFING_SYSTEM.format(current_date=date_str),
+            user=user_msg,
+            model=MODEL_LARGE,
+            temperature=0.3,
+        ).strip()
+    except Exception:
+        # Deterministic fallback when both keys fail
+        parts = [f"Briefing for {date_str}."]
+        if events:
+            parts.append(f"Today's schedule: {', '.join(e['title'] for e in events)}.")
+        else:
+            parts.append("Calendar is clear.")
+        if tasks:
+            parts.append(f"Open tasks: {', '.join(t['title'] for t in tasks[:5])}.")
+        else:
+            parts.append("No pending tasks.")
+        return " ".join(parts)
+
+
+def correct_plan(invalid_plan: dict, errors: list) -> dict:
+    """Attempt to fix an invalid plan using LLM."""
+    user_msg = (
+        f"INVALID PLAN:\n{json.dumps(invalid_plan)}\n\n"
+        f"ERRORS:\n{json.dumps(errors)}"
+    )
+    try:
+        raw = _chat(
+            system=_CORRECTION_SYSTEM,
+            user=user_msg,
+            model=MODEL_FAST,
+            temperature=0.1,
+            json_mode=True,
+        )
+        return json.loads(raw)
+    except Exception:
+        return {"status": "uncorrectable"}
+
+
+def analyze_memory_intent(user_input: str) -> dict:
+    """Determine if input is memory-related."""
+    try:
+        raw = _chat(
+            system=_MEMORY_SYSTEM,
+            user=f"User Input: {user_input}",
+            model=MODEL_FAST,
+            temperature=0.1,
+            json_mode=True,
+        )
+        return json.loads(raw)
+    except Exception:
+        return {"action": "none"}
+
+
+def analyze_file_action(context: dict) -> dict:
+    """Determine action for a new file."""
+    user_msg = (
+        f"File Name: {context.get('file_name')}\n"
+        f"File Type: {context.get('file_type')}\n"
+        f"Extracted Text (if any): {context.get('extracted_text')}"
+    )
+    try:
+        raw = _chat(
+            system=_FOLDER_SYSTEM,
+            user=user_msg,
+            model=MODEL_FAST,
+            temperature=0.1,
+            json_mode=True,
+        )
+        return json.loads(raw)
+    except Exception:
         return {"action": "ignore"}
+
+
+def generate_subtasks(task_title: str, priority: str = "medium", deadline: str = "") -> list[str]:
+    """Break a task into 3-6 actionable subtasks using the LLM."""
+    context_line = f"Priority: {priority}"
+    if deadline:
+        context_line += f", Deadline: {deadline}"
+
+    user_msg = f'Task: "{task_title}"\n{context_line}'
+
+    try:
+        raw = _chat(
+            system=_SUBTASK_SYSTEM,
+            user=user_msg,
+            model=MODEL_FAST,
+            temperature=0.3,
+            json_mode=True,
+        )
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(s) for s in parsed[:6]]
+        if isinstance(parsed, dict):
+            for v in parsed.values():
+                if isinstance(v, list):
+                    return [str(s) for s in v[:6]]
+        return []
+    except Exception:
+        print("[llm] Subtask generation failed — check API keys or retry.")
+        return []

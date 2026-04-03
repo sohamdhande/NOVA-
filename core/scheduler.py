@@ -176,8 +176,161 @@ class TaskScheduler:
             daemon=True
         )
         self._thread.start()
+        self.start_auto_jobs()
         print("[Scheduler] ✅ Running")
     
+    
+    def start_auto_jobs(self):
+        """Start auto reasoning on boot."""
+        schedule.every(1).hours.do(
+            self._run_auto_reasoning
+        )
+        # Run immediately on boot
+        import threading
+        t = threading.Thread(
+            target=self._run_auto_reasoning,
+            daemon=True
+        )
+        t.start()
+        print("[Scheduler] Auto reasoning: ON "
+              "(runs on boot + every 1h)")
+
+    def _run_auto_reasoning(self):
+        """Generate proactive system advisory."""
+        import psutil, sqlite3, os
+        from datetime import datetime
+        
+        print("[Scheduler] Running auto reasoning...")
+        
+        try:
+            advisories = []
+            
+            # CPU check
+            cpu = psutil.cpu_percent(interval=2)
+            if cpu > 80:
+                advisories.append(
+                    f"High CPU usage: {cpu}% — "
+                    f"consider closing unused apps"
+                )
+            
+            # RAM check
+            ram = psutil.virtual_memory().percent
+            if ram > 85:
+                advisories.append(
+                    f"High RAM usage: {ram}% — "
+                    f"system may slow down"
+                )
+            
+            # Disk check
+            disk = psutil.disk_usage('/').percent
+            if disk > 85:
+                advisories.append(
+                    f"Disk {disk}% full — "
+                    f"consider cleanup"
+                )
+            
+            # Battery check
+            battery = psutil.sensors_battery()
+            if battery and not battery.power_plugged \
+               and battery.percent < 20:
+                advisories.append(
+                    f"Battery low: "
+                    f"{battery.percent}% — "
+                    f"plug in soon"
+                )
+            
+            # Check overdue tasks from DB
+            db_path = os.path.join(
+                os.path.dirname(__file__),
+                "../nova_logs.db"
+            )
+            try:
+                conn = sqlite3.connect(db_path)
+                overdue = conn.execute("""
+                    SELECT COUNT(*) FROM goals 
+                    WHERE status='active' 
+                    AND deadline < datetime('now')
+                """).fetchone()[0]
+                if overdue > 0:
+                    advisories.append(
+                        f"{overdue} overdue task(s) "
+                        f"need attention"
+                    )
+                conn.close()
+            except:
+                pass
+            
+            # Save advisories to DB for HQ panel
+            try:
+                conn = sqlite3.connect(db_path)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS 
+                    advisories (
+                        id INTEGER PRIMARY KEY,
+                        message TEXT,
+                        created_at TEXT,
+                        severity TEXT
+                    )
+                """)
+                # Clear old advisories
+                conn.execute("DELETE FROM advisories")
+                
+                if advisories:
+                    for adv in advisories:
+                        severity = "warning"
+                        if "High CPU" in adv or \
+                           "High RAM" in adv:
+                            severity = "warning"
+                        if "Disk" in adv or \
+                           "overdue" in adv:
+                            severity = "critical"
+                        conn.execute(
+                            "INSERT INTO advisories "
+                            "(message, created_at, "
+                            "severity) VALUES (?,?,?)",
+                            (adv, 
+                             datetime.now().isoformat(),
+                             severity)
+                        )
+                else:
+                    conn.execute(
+                        "INSERT INTO advisories "
+                        "(message, created_at, severity)"
+                        " VALUES (?,?,?)",
+                        ("All systems nominal. "
+                         "No issues detected.",
+                         datetime.now().isoformat(),
+                         "info")
+                    )
+                conn.commit()
+                conn.close()
+                print(f"[Scheduler] Reasoning complete."
+                      f" {len(advisories)} advisories.")
+            except Exception as e:
+                print(f"[Scheduler] DB error: {e}")
+        
+        except Exception as e:
+            print(f"[Scheduler] Reasoning error: {e}")
+
+    def _log_task(self, task_id: str, message: str, status: str):
+        """Log task execution."""
+        import sqlite3, os
+        from datetime import datetime
+        db_path = os.path.join(os.path.dirname(__file__), "../nova_logs.db")
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS task_log (id TEXT, message TEXT, status TEXT, ran_at TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO task_log VALUES (?,?,?,?)",
+                (task_id, message, status, datetime.now().isoformat())
+            )
+            conn.commit()
+            conn.close()
+        except:
+            pass
+
     def _run_loop(self):
         while self._running:
             schedule.run_pending()

@@ -174,6 +174,76 @@ export function HQPanel() {
         ));
     };
 
+    const handleCleanupApprove = async (
+        messageId: string, 
+        action: string
+    ) => {
+        if (action === 'ai_cleanup_execute') {
+            // Update message to show executing
+            setMessages(prev => prev.map(m => 
+                m.id === messageId 
+                    ? {...m, data: {
+                        ...m.data, 
+                        executed: true
+                      }} 
+                    : m
+            ));
+            // Send execute command
+            try {
+                const data = await post<any>(
+                    '/api/chat', 
+                    { message: 'yes execute cleanup' }
+                );
+                // Add result message
+                const resultMsg: NovaMessage = {
+                    id: (Date.now()+1).toString(),
+                    role: 'nova' as const,
+                    content: data.message,
+                    block_type: 'text',
+                    data: {},
+                    requires_approval: false,
+                    success: true,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, resultMsg]);
+            } catch (err: any) {
+                const errorMsg: NovaMessage = {
+                    id: (Date.now()+1).toString(),
+                    role: 'nova' as const,
+                    content: "Error: " + (err.message || "Failed to execute cleanup."),
+                    block_type: 'error',
+                    data: {},
+                    requires_approval: false,
+                    success: false,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, errorMsg]);
+            }
+        }
+    };
+
+    const handleCleanupDeny = (messageId: string) => {
+        setMessages(prev => prev.map(m =>
+            m.id === messageId
+                ? {...m, data: {
+                    ...m.data,
+                    executed: true
+                  }}
+                : m
+        ));
+        const cancelMsg: NovaMessage = {
+            id: (Date.now()+1).toString(),
+            role: 'nova' as const,
+            content: 'Cleanup cancelled.',
+            block_type: 'text',
+            data: {},
+            requires_approval: false,
+            success: true,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, cancelMsg]);
+    };
+
     /* ─── Health ring ─── */
     const healthScore = health?.score ?? 0;
     const healthZone = (health?.zone ?? "CONTROLLED").toUpperCase();
@@ -185,7 +255,7 @@ export function HQPanel() {
       spend: (status as any)?.today_spend ?? 0
     };
 
-    const SectionCard = ({ title, icon, children, accent = false }: any) => (
+    const SectionCard = ({ title, children, accent = false }: any) => (
       <div className={`group relative overflow-hidden rounded-xl border p-5
         bg-black/40 backdrop-blur-md mb-4
         transition-all duration-500 hover:shadow-[0_8px_30px_rgba(0,255,204,0.08)]
@@ -331,8 +401,20 @@ export function HQPanel() {
                                 <ChatMessage
                                     key={msg.id}
                                     message={msg}
-                                    onApprove={() => handleApprove(msg.id)}
-                                    onDeny={() => handleDeny(msg.id)}
+                                    onApprove={(id, action) => {
+                                        if (action === 'ai_cleanup_execute' && id) {
+                                            handleCleanupApprove(id, action);
+                                        } else {
+                                            handleApprove(msg.id);
+                                        }
+                                    }}
+                                    onDeny={(id) => {
+                                        if (msg.block_type === 'cleanup_approval' && id) {
+                                            handleCleanupDeny(id);
+                                        } else {
+                                            handleDeny(msg.id);
+                                        }
+                                    }}
                                 />
                             ))}
                             {isThinking && (

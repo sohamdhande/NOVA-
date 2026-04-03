@@ -12,7 +12,7 @@ router = APIRouter()
 async def get_status():
     return {
         "status": "online",
-        "model": "llama3.2"
+        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile")
     }
 
 @router.post("/nova/shutdown")
@@ -387,28 +387,296 @@ def get_metrics():
 # Goals
 # ─────────────────────────────────────────
 
-# STUB - replace with real data
+def _goals_db():
+    import sqlite3, os
+    db = os.path.join(
+        os.path.dirname(__file__), 
+        "../nova_logs.db"
+    )
+    conn = sqlite3.connect(db)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS goals (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            target TEXT,
+            deadline TEXT,
+            progress INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT 
+                (datetime('now'))
+        )
+    """)
+    conn.commit()
+    return conn
+
+
 @router.get("/goals")
 def get_goals():
+    import uuid
+    conn = _goals_db()
+    rows = conn.execute(
+        "SELECT id, title, target, deadline, "
+        "progress, status FROM goals "
+        "ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
     return JSONResponse(content={
         "goals": [
-            {"id": "g1", "title": "Code 4hrs daily", "progress": 65, "status": "active"},
-            {"id": "g2", "title": "Learn Playwright", "progress": 30, "status": "active"},
-            {"id": "g3", "title": "Clear backlog", "progress": 100, "status": "completed"}
+            {
+                "id": r[0], "title": r[1],
+                "target": r[2], "deadline": r[3],
+                "progress": r[4], "status": r[5]
+            } for r in rows
         ]
     })
 
 
 class GoalCreate(BaseModel):
     title: str
-    target: str
-    deadline: str
+    target: str = ""
+    deadline: str = ""
 
 
-# STUB - replace with real data
 @router.post("/goals")
 def create_goal(req: GoalCreate):
-    return JSONResponse(content={"status": "created", "id": "g_new"})
+    import uuid
+    goal_id = str(uuid.uuid4())[:8]
+    conn = _goals_db()
+    conn.execute(
+        "INSERT INTO goals "
+        "(id, title, target, deadline) "
+        "VALUES (?,?,?,?)",
+        (goal_id, req.title, 
+         req.target, req.deadline)
+    )
+    conn.commit()
+    conn.close()
+    return JSONResponse(content={
+        "status": "created", "id": goal_id
+    })
+
+
+@router.patch("/goals/{goal_id}")
+def update_goal(goal_id: str, req: dict = None):
+    from fastapi import Request as Req
+    conn = _goals_db()
+    if req and "progress" in req:
+        conn.execute(
+            "UPDATE goals SET progress=? "
+            "WHERE id=?",
+            (req["progress"], goal_id)
+        )
+    if req and "status" in req:
+        conn.execute(
+            "UPDATE goals SET status=? "
+            "WHERE id=?",
+            (req["status"], goal_id)
+        )
+    conn.commit()
+    conn.close()
+    return JSONResponse(
+        content={"status": "updated"}
+    )
+
+
+@router.delete("/goals/{goal_id}")
+def delete_goal(goal_id: str):
+    conn = _goals_db()
+    conn.execute(
+        "DELETE FROM goals WHERE id=?",
+        (goal_id,)
+    )
+    conn.commit()
+    conn.close()
+    return JSONResponse(
+        content={"status": "deleted"}
+    )
+
+
+def _tasks_db():
+    import sqlite3, os
+    db = os.path.join(
+        os.path.dirname(__file__),
+        "../nova_logs.db"
+    )
+    conn = sqlite3.connect(db)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            priority TEXT DEFAULT 'medium',
+            status TEXT DEFAULT 'pending',
+            deadline TEXT,
+            created_at TEXT DEFAULT 
+                (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS subtasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            order_index INTEGER DEFAULT 0,
+            FOREIGN KEY (task_id) REFERENCES tasks(id)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+@router.get("/tasks")
+def get_tasks():
+    conn = _tasks_db()
+    rows = conn.execute(
+        "SELECT id, title, priority, "
+        "status, deadline FROM tasks "
+        "WHERE status != 'deleted' "
+        "ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return JSONResponse(content={
+        "tasks": [
+            {
+                "id": r[0], "title": r[1],
+                "priority": r[2], "status": r[3],
+                "deadline": r[4]
+            } for r in rows
+        ]
+    })
+
+
+class TaskCreate(BaseModel):
+    title: str
+    priority: str = "medium"
+    deadline: str = ""
+
+
+@router.post("/tasks")
+def create_task(req: TaskCreate):
+    import uuid
+    task_id = str(uuid.uuid4())[:8]
+    conn = _tasks_db()
+    conn.execute(
+        "INSERT INTO tasks "
+        "(id, title, priority, deadline) "
+        "VALUES (?,?,?,?)",
+        (task_id, req.title,
+         req.priority, req.deadline)
+    )
+    conn.commit()
+
+    # Generate subtasks via LLM
+    subtask_count = 0
+    try:
+        from llm import generate_subtasks
+        subtask_titles = generate_subtasks(
+            req.title, req.priority, req.deadline
+        )
+        for idx, st in enumerate(subtask_titles):
+            conn.execute(
+                "INSERT INTO subtasks "
+                "(task_id, title, status, order_index) "
+                "VALUES (?,?,?,?)",
+                (task_id, st, "pending", idx)
+            )
+        conn.commit()
+        subtask_count = len(subtask_titles)
+    except Exception as e:
+        print(f"[API] Subtask generation failed: {e}")
+
+    conn.close()
+    return JSONResponse(content={
+        "status": "created",
+        "id": task_id,
+        "subtasks_generated": subtask_count
+    })
+
+
+@router.patch("/tasks/{task_id}")
+async def update_task(
+    task_id: str, request: Request
+):
+    body = await request.json()
+    conn = _tasks_db()
+    if "status" in body:
+        conn.execute(
+            "UPDATE tasks SET status=? "
+            "WHERE id=?",
+            (body["status"], task_id)
+        )
+    if "priority" in body:
+        conn.execute(
+            "UPDATE tasks SET priority=? "
+            "WHERE id=?",
+            (body["priority"], task_id)
+        )
+    conn.commit()
+    conn.close()
+    return JSONResponse(
+        content={"status": "updated"}
+    )
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task(task_id: str):
+    conn = _tasks_db()
+    conn.execute(
+        "DELETE FROM tasks WHERE id=?",
+        (task_id,)
+    )
+    conn.execute(
+        "DELETE FROM subtasks WHERE task_id=?",
+        (task_id,)
+    )
+    conn.commit()
+    conn.close()
+    return JSONResponse(
+        content={"status": "deleted"}
+    )
+
+
+@router.get("/tasks/{task_id}/subtasks")
+def get_subtasks(task_id: str):
+    conn = _tasks_db()
+    rows = conn.execute(
+        "SELECT id, task_id, title, status, order_index "
+        "FROM subtasks WHERE task_id=? "
+        "ORDER BY order_index ASC",
+        (task_id,)
+    ).fetchall()
+    conn.close()
+    return JSONResponse(content={
+        "task_id": task_id,
+        "subtasks": [
+            {
+                "id": r[0],
+                "task_id": r[1],
+                "title": r[2],
+                "status": r[3],
+                "order_index": r[4]
+            } for r in rows
+        ]
+    })
+
+
+@router.patch("/tasks/{task_id}/subtasks/{subtask_id}")
+async def update_subtask(
+    task_id: str, subtask_id: int, request: Request
+):
+    body = await request.json()
+    conn = _tasks_db()
+    if "status" in body:
+        conn.execute(
+            "UPDATE subtasks SET status=? "
+            "WHERE id=? AND task_id=?",
+            (body["status"], subtask_id, task_id)
+        )
+    conn.commit()
+    conn.close()
+    return JSONResponse(
+        content={"status": "updated"}
+    )
 
 
 # ─────────────────────────────────────────
@@ -466,7 +734,9 @@ async def terminal_execute(request: Request):
         "node --version", "npm list", "npm --version",
         "ollama list", "ollama ps",
         "top -l 1", "uptime", "date", "cal",
-        "open .", "open -a"
+        "open .", "open -a",
+        "check processes", "nova status", "system scan",
+        "ps -ef", "netstat", "lsof -i", "sw_vers"
     ]
     
     BLOCKED = [
@@ -520,11 +790,11 @@ async def terminal_execute(request: Request):
         })
     
     # Execute whitelisted command
-    import subprocess
+    import subprocess, shlex
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            shlex.split(command),
+            shell=False,
             capture_output=True,
             text=True,
             timeout=15,
@@ -600,7 +870,7 @@ def get_reasoning():
         ],
         "confidence": 87,
         "last_inference_ms": 1840,
-        "model": "llama3.2",
+        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile"),
         "recent_thoughts": [
             "No urgent emails detected.",
             "Task deadline approaching in 2h.",
@@ -733,10 +1003,114 @@ async def run_security_scan():
         })
 
 # STUB - replace with real data
+
+@router.get("/security/settings")
+def get_security_settings():
+    import sqlite3, json, os
+    db_path = os.path.expanduser("~/.nova/security.db")
+    defaults = {
+        "auto_cleanup": "true",
+        "auto_reasoning": "true", 
+        "auto_reply": "false",
+        "risk_threshold": "balanced",
+        "autonomy": "controlled"
+    }
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS 
+            security_settings (
+                key TEXT PRIMARY KEY, 
+                value TEXT
+            )""")
+        # Insert defaults if not exist
+        for k, v in defaults.items():
+            c.execute(
+                "INSERT OR IGNORE INTO security_settings VALUES (?,?)",
+                (k, v)
+            )
+        conn.commit()
+        rows = dict(c.execute(
+            "SELECT key, value FROM security_settings"
+        ).fetchall())
+        conn.close()
+        return JSONResponse(content={
+            "auto_cleanup": rows.get("auto_cleanup", "true") == "true",
+            "auto_reasoning": rows.get("auto_reasoning", "true") == "true",
+            "auto_reply": rows.get("auto_reply", "false") == "true",
+            "risk_threshold": rows.get("risk_threshold", "balanced"),
+            "autonomy_level": rows.get("autonomy", "controlled")
+        })
+    except Exception as e:
+        return JSONResponse(content=defaults)
+
+@router.post("/security/autonomy")
+def update_autonomy(req: dict):
+    import sqlite3, json, os
+    db_path = os.path.expanduser("~/.nova/security.db")
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS 
+            security_settings (
+                key TEXT PRIMARY KEY, 
+                value TEXT
+            )""")
+            
+        # Parse inputs
+        for k, v in req.items():
+            # Convert booleans to strings for sqlite
+            str_val = str(v).lower() if isinstance(v, bool) else str(v)
+            c.execute(
+                "INSERT OR REPLACE INTO security_settings VALUES (?,?)",
+                (k, str_val)
+            )
+        conn.commit()
+        conn.close()
+        
+        # Reload scheduler if cleanup/reasoning changed
+        if 'auto_cleanup' in req or 'auto_reasoning' in req:
+            try:
+                from core.scheduler import scheduler
+                import schedule
+                schedule.clear('auto_cleanup')
+                schedule.clear('auto_reasoning')
+                scheduler.start_auto_jobs()
+            except Exception as e:
+                print(f"[Scheduler] Reload error: {e}")
+                
+        return JSONResponse(content={"status": "updated"})
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
 @router.get("/security")
 def get_security():
+    import sqlite3, os
+    db_path = os.path.expanduser("~/.nova/security.db")
+    
+    # default fallback
+    autonomy_level = "controlled"
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute("""CREATE TABLE IF NOT EXISTS 
+            security_settings (
+                key TEXT PRIMARY KEY, 
+                value TEXT
+            )""")
+        rows = dict(c.execute(
+            "SELECT key, value FROM security_settings"
+        ).fetchall())
+        conn.close()
+        
+        autonomy_level = rows.get("autonomy", "controlled")
+    except:
+        pass
+        
     return JSONResponse(content={
-        "autonomy_level": "controlled",
+        "autonomy_level": autonomy_level,
         "biometric_session_active": True,
         "session_expires_in_minutes": 24,
         "command_whitelist": ["ls", "pwd", "git status", "brew list", "ps aux"],
@@ -878,6 +1252,19 @@ async def chat(request: Request):
         print(f"[CHAT] Params: {intent.params}")
         
         result = await tool_router.route(intent)
+        
+        # Guard against None result from handlers
+        if result is None:
+            from core.tool_router import ToolResult
+            result = ToolResult(
+                success=False,
+                intent=intent.intent,
+                output="Unable to process that request.",
+                data={},
+                block_type="error",
+                risk="LOW",
+                requires_approval=False
+            )
         
         # Auto-save important facts from conversation
         memory_engine.save_conversation_summary([

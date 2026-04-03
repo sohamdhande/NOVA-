@@ -7,7 +7,7 @@ function Skeleton() {
 }
 
 export function SecurityPanel() {
-    const { get, post } = useApi();
+    const { get, post, apiFetch } = useApi();
     const { addToast } = useNovaStore();
 
     const [status, setStatus] = useState<any>({});
@@ -29,6 +29,7 @@ export function SecurityPanel() {
     const [lastUpdated, setLastUpdated] = useState(new Date());
 
     const [newCommand, setNewCommand] = useState("");
+    const [newBlockedCmd, setNewBlockedCmd] = useState('');
 
     const fetchData = useCallback(async () => {
         try {
@@ -97,8 +98,9 @@ export function SecurityPanel() {
         if (!newCommand.trim()) return;
         try {
             // Mock API endpoint
-            await post('/api/chat', { message: `whitelist command ${newCommand}` });
-            addToast({ id: crypto.randomUUID(), type: 'success', message: 'Command queued for whitelist approval' });
+            const data = await post<any>('/api/security/whitelist', { command: newCommand });
+            setWhitelist(data.whitelist || [...whitelist, newCommand]);
+            addToast({ id: crypto.randomUUID(), type: 'success', message: `Added '${newCommand}' to whitelist` });
             setNewCommand("");
         } catch {
             addToast({ id: crypto.randomUUID(), type: 'error', message: 'Failed to whitelist command' });
@@ -108,11 +110,48 @@ export function SecurityPanel() {
     const handleRemoveWhitelist = async (cmd: string) => {
         if (!window.confirm(`Remove ${cmd} from whitelist?`)) return;
         try {
-            await post('/api/chat', { message: `remove whitelist ${cmd}` });
+            await apiFetch(`/api/security/whitelist/${encodeURIComponent(cmd)}`, { method: 'DELETE' });
+            setWhitelist(whitelist.filter(w => w !== cmd));
             addToast({ id: crypto.randomUUID(), type: 'success', message: 'Removed from whitelist' });
-            setWhitelist(prev => prev.filter(c => c !== cmd));
         } catch {
             addToast({ id: crypto.randomUUID(), type: 'error', message: 'Failed to remove' });
+        }
+    };
+
+    const handleAddBlocked = async (cmd: string) => {
+        try {
+            const data = await post<any>(
+                '/api/security/blocked', 
+                { command: cmd }
+            );
+            setBlockedCommands(
+                data.blocked || [...blockedCommands, cmd]
+            );
+            addToast({ 
+                id: crypto.randomUUID(), 
+                type: 'success', 
+                message: `Blocked '${cmd}'` 
+            });
+        } catch(e) {
+            addToast({ 
+                id: crypto.randomUUID(), 
+                type: 'error', 
+                message: 'Failed to block command' 
+            });
+        }
+    };
+
+    const handleRemoveBlocked = async (cmd: string) => {
+        try {
+            await apiFetch(
+                `/api/security/blocked/${encodeURIComponent(cmd)}`, 
+                { method: 'DELETE' }
+            );
+            setBlockedCommands(
+                blockedCommands.filter(b => b !== cmd)
+            );
+        } catch(e) {
+            console.error('Remove blocked failed:', e);
         }
     };
 
@@ -120,7 +159,7 @@ export function SecurityPanel() {
         const newVal = !toggles[key];
         setToggles(p => ({ ...p, [key]: newVal }));
         try {
-            await post('/api/settings', { [key]: newVal });
+            await post<any>('/api/security/autonomy', { [key]: newVal });
         } catch {
             // rollback optimistically
             setToggles(p => ({ ...p, [key]: !newVal }));
@@ -131,7 +170,7 @@ export function SecurityPanel() {
     const handleRiskChange = async (val: string) => {
         setRiskThreshold(val);
         try {
-            await post('/api/settings', { autonomy_level: val });
+            await post<any>('/api/security/autonomy', { autonomy_level: val });
         } catch {
             addToast({ id: crypto.randomUUID(), type: 'error', message: 'Failed to update risk threshold' });
         }
@@ -401,7 +440,7 @@ export function SecurityPanel() {
                                     <div key={i} className="flex items-center gap-2 bg-[#0a0a0a] border border-red-500/20 rounded px-3 py-2 text-xs font-mono group">
                                         <span className="text-red-400">$</span>
                                         <span className="text-[#e2e8f0] flex-1 truncate">{cmd.cmd || cmd}</span>
-                                        <button className="text-red-400/50 hover:text-red-400 text-xs">✕</button>
+                                        <button onClick={() => handleRemoveBlocked(cmd.cmd || cmd)} className="text-red-400/50 hover:text-red-400 text-xs cursor-pointer">✕</button>
                                     </div>
                                 ))
                             ) : (
@@ -409,6 +448,37 @@ export function SecurityPanel() {
                                     No blocked commands configured
                                 </div>
                             )}
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                            <input
+                                value={newBlockedCmd}
+                                onChange={e => setNewBlockedCmd(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' && newBlockedCmd.trim()) {
+                                        handleAddBlocked(newBlockedCmd.trim());
+                                        setNewBlockedCmd('');
+                                    }
+                                }}
+                                placeholder="block command..."
+                                className="flex-1 bg-[#0a0a0a] border 
+                                  border-red-500/20 rounded px-3 py-1.5 
+                                  text-xs font-mono text-[#e2e8f0] 
+                                  outline-none placeholder-[#4a6a6a]
+                                  focus:border-red-500/40"
+                            />
+                            <button 
+                              onClick={() => {
+                                  if (newBlockedCmd.trim()) {
+                                      handleAddBlocked(newBlockedCmd.trim());
+                                      setNewBlockedCmd('');
+                                  }
+                              }}
+                              className="px-3 py-1.5 rounded border
+                                border-red-500/40 text-red-400 
+                                text-xs font-mono 
+                                hover:bg-red-500/10 transition-all cursor-pointer">
+                                BLOCK
+                            </button>
                         </div>
                     </div>
                 </div>

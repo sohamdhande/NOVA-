@@ -163,7 +163,14 @@ export function TerminalPanel() {
 
     const QuickCommandPill = ({ cmd }: { cmd: string }) => (
         <button
-            onClick={() => setInput(cmd)}
+            onClick={() => {
+                const cmdMap: Record<string, string> = {
+                    'check processes': 'ps aux | head -20',
+                    'nova status': 'ps aux | grep nova',
+                    'system scan': 'df -h && uptime',
+                };
+                executeCommand(cmdMap[cmd] ?? cmd);
+            }}
             className="text-[9px] bg-[var(--nova-surface2)] text-[var(--nova-text)] px-2 py-1 rounded font-mono hover:bg-[var(--nova-accent)] hover:text-black transition-colors cursor-pointer mr-2 mb-2"
         >
             {cmd}

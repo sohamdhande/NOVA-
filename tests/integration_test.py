@@ -26,22 +26,15 @@ def log(status, component, message):
 
 async def test_llm():
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "llama3.2",
-                      "prompt": "Say OK",
-                      "stream": False},
-                timeout=15
-            )
-            if r.status_code == 200:
-                log(PASS, "LLM (llama3.2)", 
-                    "Ollama responding")
-            else:
-                log(FAIL, "LLM (llama3.2)",
-                    f"Status {r.status_code}")
+        from llm import _chat
+        # Just to check if Groq responds
+        resp = _chat(system="Test", user="Say OK")
+        if resp:
+            log(PASS, "LLM (Groq)", "API responding")
+        else:
+            log(FAIL, "LLM (Groq)", "Empty response")
     except Exception as e:
-        log(FAIL, "LLM (llama3.2)", str(e))
+        log(FAIL, "LLM (Groq)", str(e))
 
 async def get_auth_token(client):
     try:

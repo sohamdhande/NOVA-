@@ -65,8 +65,6 @@ class TaskPlanner:
     vision feedback between each step.
     """
     
-    OLLAMA_URL = "http://localhost:11434/api/generate"
-    MODEL = "llama3.2"
     
     def __init__(self):
         self._active_tasks: dict[str, AutoTask] = {}
@@ -188,30 +186,25 @@ Example for "open chrome and go to github":
 Return ONLY the JSON array. No explanation."""
 
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    self.OLLAMA_URL,
-                    json={
-                        "model": self.MODEL,
-                        "prompt": f"{SYSTEM}\n\n"
-                                  f"Task: {instruction}",
-                        "stream": False
-                    },
-                    timeout=30.0
-                )
-                text = resp.json().get("response", "[]")
-                
-                # Clean JSON
-                if "```json" in text:
-                    text = text.split(
-                        "```json")[1].split("```")[0]
-                elif "```" in text:
-                    text = text.split(
-                        "```")[1].split("```")[0]
-                
-                steps = json.loads(text.strip())
-                if isinstance(steps, list):
-                    return steps
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from llm import _chat
+            text = _chat(
+                system=SYSTEM,
+                user=f"Task: {instruction}",
+                json_mode=True
+            )
+            
+            # Clean JSON
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            
+            steps = json.loads(text.strip())
+            if isinstance(steps, list):
+                return steps
         except Exception as e:
             print(f"[Planner] Plan generation failed: {e}")
         
@@ -264,8 +257,8 @@ Return ONLY the JSON array. No explanation."""
                     img, f"before_step{i}"
                 )
                 step.screenshot_before = path
-            except:
-                pass
+            except Exception as e:
+                print(f"[TaskPlanner] Screenshot before failed: {e}")
             
             # Check approval requirement
             if step.requires_approval or \
@@ -313,8 +306,8 @@ Return ONLY the JSON array. No explanation."""
                     img, f"after_step{i}"
                 )
                 step.screenshot_after = path
-            except:
-                pass
+            except Exception as e:
+                print(f"[TaskPlanner] Screenshot after failed: {e}")
             
             # Callback for UI updates
             if on_step_complete:
@@ -402,10 +395,10 @@ Return ONLY the JSON array. No explanation."""
             return f"Typed: {text[:50]}"
         
         elif t == "shell":
-            import subprocess
+            import subprocess, shlex
             cmd = p.get("command", "")
             result = subprocess.run(
-                cmd, shell=True,
+                shlex.split(cmd), shell=False,
                 capture_output=True, text=True,
                 timeout=30
             )
@@ -464,19 +457,11 @@ Return ONLY the JSON array. No explanation."""
     async def _ask_llm(self, prompt: str) -> str:
         """Send prompt to local LLM."""
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    self.OLLAMA_URL,
-                    json={
-                        "model": self.MODEL,
-                        "prompt": prompt,
-                        "stream": False
-                    },
-                    timeout=30.0
-                )
-                return resp.json().get(
-                    "response", ""
-                )
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from llm import _chat
+            return _chat(system="", user=prompt)
         except Exception as e:
             return f"LLM error: {e}"
     
@@ -515,8 +500,8 @@ Suggest a simple recovery action as JSON:
                     step, vision, computer
                 )
                 return True
-        except:
-            pass
+        except Exception as e:
+            print(f"[TaskPlanner] Vision feedback analysis failed: {e}")
         return False
     
     async def _request_approval(self,
@@ -567,7 +552,7 @@ Suggest a simple recovery action as JSON:
                     payload = json.loads(row[0])
                     if payload.get("step_id") == step.id:
                         return True
-            except:
+            except (OSError, KeyError, ValueError) as e:
                 pass
             await asyncio.sleep(1)
         return False

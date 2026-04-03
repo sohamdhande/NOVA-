@@ -29,7 +29,7 @@ export function BrowserPanel() {
 
     const fetchData = useCallback(async () => {
         try {
-            const [statRes, autoRes, memRes] = await Promise.all([
+            const [_, autoRes, memRes] = await Promise.all([
                 get<any>('/api/status').catch(() => ({ status: 'online' })), // using status as proxy for browser status for now
                 get<any[]>('/api/automations').catch(() => []),
                 get<any[]>('/api/memory').catch(() => [])

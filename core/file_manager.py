@@ -100,7 +100,7 @@ class FileManager:
                         })
                     else:
                         hashes[h] = fpath
-                except:
+                except (OSError, PermissionError) as e:
                     pass
         
         return duplicates
@@ -211,7 +211,7 @@ class FileManager:
                             "size_mb": round(size_mb, 1),
                             "name": f
                         })
-                except:
+                except (OSError, PermissionError):
                     pass
         
         return sorted(
@@ -238,7 +238,7 @@ class FileManager:
                     ext = Path(f).suffix.lower()
                     type_counts[ext] = \
                         type_counts.get(ext, 0) + 1
-                except:
+                except (OSError, PermissionError):
                     pass
         
         return {
@@ -352,5 +352,342 @@ class FileManager:
         )
         new_doc.save(output)
         return f"PDF split saved: {output}"
+
+
+    async def ai_cleanup_analysis(self, 
+                                   folder: str) -> dict:
+        """AI-powered cleanup analysis. Returns a 
+        report dict without executing anything."""
+        import os, hashlib, httpx
+        from datetime import datetime, timedelta
+        
+        folder = os.path.expanduser(folder)
+        if not os.path.exists(folder):
+            return {"error": f"Folder not found: {folder}"}
+        
+        print(f"[FileManager] Analyzing {folder}...")
+        
+        # ── SCAN ─────────────────────────────────
+        junk = []          # delete these
+        to_organize = []   # move to subfolders
+        to_archive = []    # move to _archive
+        duplicates = []    # duplicate files
+        
+        JUNK_NAMES = {
+            '.DS_Store', 'Thumbs.db', '.localized',
+            'desktop.ini', '.Spotlight-V100',
+            '.Trashes', '.fseventsd'
+        }
+        JUNK_EXTENSIONS = {
+            '.tmp', '.temp', '.log', '.cache',
+            '.bak', '.old', '.orig', '.swp',
+            '~'
+        }
+        ORGANIZE_MAP = {
+            'Images': {
+                '.jpg','.jpeg','.png','.gif',
+                '.webp','.svg','.ico','.heic',
+                '.raw','.tiff'
+            },
+            'Documents': {
+                '.pdf','.doc','.docx','.txt',
+                '.md','.pages','.rtf','.odt'
+            },
+            'Spreadsheets': {
+                '.xls','.xlsx','.csv','.numbers'
+            },
+            'Presentations': {
+                '.ppt','.pptx','.key'
+            },
+            'Videos': {
+                '.mp4','.mov','.avi','.mkv',
+                '.wmv','.flv','.webm'
+            },
+            'Audio': {
+                '.mp3','.wav','.flac','.aac',
+                '.m4a','.ogg'
+            },
+            'Archives': {
+                '.zip','.tar','.gz','.rar',
+                '.7z','.dmg','.pkg'
+            },
+            'Code': {
+                '.py','.js','.ts','.html',
+                '.css','.json','.yaml','.yml',
+                '.sh','.bash','.rb','.go',
+                '.rs','.cpp','.c','.h'
+            },
+        }
+        
+        # Build reverse map: ext -> folder
+        ext_to_folder = {}
+        for folder_name, exts in ORGANIZE_MAP.items():
+            for ext in exts:
+                ext_to_folder[ext] = folder_name
+        
+        # Hash map for duplicate detection
+        hashes = {}
+        cutoff = datetime.now() - timedelta(days=30)
+        
+        total_size = 0
+        junk_size = 0
+        archive_size = 0
+        
+        try:
+            entries = os.listdir(folder)
+        except PermissionError:
+            return {"error": "Permission denied"}
+        
+        for fname in entries:
+            fpath = os.path.join(folder, fname)
+            
+            # Skip hidden system files we don't 
+            # want to touch
+            if fname.startswith('.') and \
+               fname not in JUNK_NAMES:
+                continue
+            
+            try:
+                stat = os.stat(fpath)
+                size_mb = stat.st_size / (1024*1024)
+                total_size += size_mb
+                mtime = datetime.fromtimestamp(
+                    stat.st_mtime
+                )
+                
+                ext = os.path.splitext(fname)[1].lower()
+                
+                # 1. JUNK CHECK
+                if fname in JUNK_NAMES or \
+                   ext in JUNK_EXTENSIONS:
+                    junk.append({
+                        "path": fpath,
+                        "name": fname,
+                        "size_mb": round(size_mb, 2),
+                        "reason": "junk file"
+                    })
+                    junk_size += size_mb
+                    continue
+                
+                # 2. DUPLICATE CHECK (files only)
+                if os.path.isfile(fpath) and \
+                   stat.st_size < 100*1024*1024:
+                    try:
+                        h = hashlib.md5()
+                        with open(fpath, 'rb') as f:
+                            h.update(f.read(8192))
+                        fhash = h.hexdigest()
+                        if fhash in hashes:
+                            duplicates.append({
+                                "path": fpath,
+                                "name": fname,
+                                "size_mb": round(
+                                    size_mb, 2
+                                ),
+                                "duplicate_of": hashes[
+                                    fhash
+                                ],
+                                "reason": "duplicate"
+                            })
+                            junk_size += size_mb
+                        else:
+                            hashes[fhash] = fpath
+                    except (OSError, PermissionError):
+                        pass
+                
+                # 3. ARCHIVE CHECK (old files)
+                if mtime < cutoff and \
+                   os.path.isfile(fpath):
+                    days_old = (
+                        datetime.now() - mtime
+                    ).days
+                    to_archive.append({
+                        "path": fpath,
+                        "name": fname,
+                        "size_mb": round(size_mb, 2),
+                        "days_old": days_old,
+                        "reason": f"not used in "
+                                  f"{days_old} days"
+                    })
+                    archive_size += size_mb
+                    continue
+                
+                # 4. ORGANIZE CHECK
+                if os.path.isfile(fpath) and \
+                   ext in ext_to_folder:
+                    target_folder = ext_to_folder[ext]
+                    to_organize.append({
+                        "path": fpath,
+                        "name": fname,
+                        "size_mb": round(size_mb, 2),
+                        "move_to": target_folder,
+                        "reason": f"belongs in "
+                                  f"{target_folder}/"
+                    })
+            
+            except (PermissionError, OSError):
+                pass
+        
+        # ── AI SUMMARY ───────────────────────────
+        summary_prompt = (
+            f"You are analyzing the folder: {folder}\n"
+            f"Files scanned: {len(entries)}\n"
+            f"Total size: {round(total_size, 1)} MB\n\n"
+            f"Found:\n"
+            f"- {len(junk)} junk files "
+            f"({round(junk_size,1)} MB)\n"
+            f"- {len(duplicates)} duplicates\n"
+            f"- {len(to_archive)} old files to archive "
+            f"({round(archive_size,1)} MB)\n"
+            f"- {len(to_organize)} files to organize\n\n"
+            f"Junk examples: "
+            f"{[j['name'] for j in junk[:5]]}\n"
+            f"Archive examples: "
+            f"{[a['name'] for a in to_archive[:5]]}\n\n"
+            f"Write a 2-sentence summary of what "
+            f"should be done, then list the top 3 "
+            f"most impactful actions."
+        )
+        
+        ai_summary = "Analysis complete."
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from llm import _chat
+            ai_summary = _chat(
+                system="You are an AI assistant analyzing file folders.",
+                user=summary_prompt
+            )
+        except Exception as e:
+            print(f"[FileManager] AI cleanup analysis failed: {e}")
+            ai_summary = (
+                f"Found {len(junk)} junk files, "
+                f"{len(duplicates)} duplicates, "
+                f"{len(to_archive)} files to archive, "
+                f"and {len(to_organize)} files to "
+                f"organize. Approve to proceed."
+            )
+        
+        return {
+            "folder": folder,
+            "total_files": len(entries),
+            "total_size_mb": round(total_size, 1),
+            "junk": junk,
+            "duplicates": duplicates,
+            "to_archive": to_archive,
+            "to_organize": to_organize,
+            "junk_size_mb": round(junk_size, 1),
+            "archive_size_mb": round(archive_size, 1),
+            "ai_summary": ai_summary,
+            "status": "pending_approval"
+        }
+
+    async def ai_cleanup_execute(self,
+                                  report: dict) -> str:
+        """Execute cleanup after user approval."""
+        import os, shutil
+        from datetime import datetime
+        
+        folder = report["folder"]
+        results = []
+        freed_mb = 0
+        
+        # 1. Delete junk
+        for item in report.get("junk", []):
+            try:
+                if os.path.isfile(item["path"]):
+                    os.remove(item["path"])
+                elif os.path.isdir(item["path"]):
+                    shutil.rmtree(item["path"])
+                freed_mb += item.get("size_mb", 0)
+                results.append(
+                    f"🗑 Deleted: {item['name']}"
+                )
+            except Exception as e:
+                results.append(
+                    f"✗ Could not delete "
+                    f"{item['name']}: {e}"
+                )
+        
+        # 2. Delete duplicates
+        for item in report.get("duplicates", []):
+            try:
+                os.remove(item["path"])
+                freed_mb += item.get("size_mb", 0)
+                results.append(
+                    f"🗑 Removed duplicate: "
+                    f"{item['name']}"
+                )
+            except Exception as e:
+                results.append(
+                    f"✗ Could not remove "
+                    f"{item['name']}: {e}"
+                )
+        
+        # 3. Archive old files
+        archive_dir = os.path.join(
+            folder, "_archive"
+        )
+        os.makedirs(archive_dir, exist_ok=True)
+        for item in report.get("to_archive", []):
+            try:
+                dest = os.path.join(
+                    archive_dir, item["name"]
+                )
+                shutil.move(item["path"], dest)
+                results.append(
+                    f"📦 Archived: {item['name']} "
+                    f"({item['days_old']} days old)"
+                )
+            except Exception as e:
+                results.append(
+                    f"✗ Could not archive "
+                    f"{item['name']}: {e}"
+                )
+        
+        # 4. Organize files into subfolders
+        for item in report.get("to_organize", []):
+            try:
+                target_dir = os.path.join(
+                    folder, item["move_to"]
+                )
+                os.makedirs(target_dir, exist_ok=True)
+                dest = os.path.join(
+                    target_dir, item["name"]
+                )
+                # Handle name conflicts
+                if os.path.exists(dest):
+                    base, ext = os.path.splitext(
+                        item["name"]
+                    )
+                    dest = os.path.join(
+                        target_dir,
+                        f"{base}_{datetime.now().strftime('%H%M%S')}{ext}"
+                    )
+                shutil.move(item["path"], dest)
+                results.append(
+                    f"📁 Moved: {item['name']} → "
+                    f"{item['move_to']}/"
+                )
+            except Exception as e:
+                results.append(
+                    f"✗ Could not move "
+                    f"{item['name']}: {e}"
+                )
+        
+        summary = (
+            f"✅ Cleanup complete!\n"
+            f"Freed: {round(freed_mb, 1)} MB\n"
+            f"Actions taken: {len(results)}\n\n"
+            + "\n".join(results[:20])
+        )
+        
+        if len(results) > 20:
+            summary += (
+                f"\n... and {len(results)-20} more"
+            )
+        
+        return summary
 
 file_manager = FileManager()

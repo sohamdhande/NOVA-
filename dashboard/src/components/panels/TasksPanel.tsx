@@ -10,7 +10,10 @@ interface Goal { id: string; title: string; progress: number; status: string; ta
 interface Task { id: string; title: string; priority: string; status: string; deadline?: string; due_time?: string; }
 
 export function TasksPanel() {
-    const { get, post, patch } = useApi();
+    const { get, post, patch, apiFetch } = useApi();
+    const del = async (url: string) => {
+        return apiFetch(url, { method: 'DELETE' });
+    };
     const [goals, setGoals] = useState<Goal[]>([]);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
@@ -36,11 +39,6 @@ export function TasksPanel() {
     }, [get]);
 
     useEffect(() => { fetchAll(); const iv = setInterval(fetchAll, 30000); return () => clearInterval(iv); }, [fetchAll]);
-
-    const completeTask = async (id: string) => {
-        try { await patch(`/api/tasks/${id}`, { status: "completed" }); fetchAll(); }
-        catch { /* ignore */ }
-    };
 
     const addGoal = async () => {
         if (!goalForm.title) return;
@@ -115,15 +113,39 @@ export function TasksPanel() {
                             {goals.map((g) => (
                                 <div key={g.id} className="nova-card">
                                     <div className="flex items-center justify-between mb-2">
-                                        <span className="text-xs font-mono text-[var(--nova-text)]">{g.title}</span>
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-mono text-[var(--nova-text)]">{g.title}</span>
+                                            {g.deadline && <span className="text-[8px] font-mono text-[var(--nova-muted)] mt-0.5">Due: {g.deadline}</span>}
+                                        </div>
                                         <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded ${g.status === "completed" ? "bg-[var(--nova-green)]/20 text-[var(--nova-green)]" : g.status === "missed" ? "bg-[var(--nova-red)]/20 text-[var(--nova-red)]" : "bg-[var(--nova-accent)]/20 text-[var(--nova-accent)]"}`}>
                                             {g.status?.toUpperCase()}
                                         </span>
                                     </div>
                                     <div className="w-full h-1.5 bg-[var(--nova-surface2)] rounded-full overflow-hidden mb-1">
-                                        <div className="h-full bg-[var(--nova-accent)] rounded-full transition-all duration-500" style={{ width: `${Math.min(g.progress, 100)}%` }} />
+                                        <div className={`h-full rounded-full transition-all duration-500 ${g.status === 'completed' ? 'bg-[#00ffcc]' : 'bg-[#00ffcc]'}`} style={{ width: `${g.status === 'completed' ? 100 : Math.min(g.progress, 100)}%` }} />
                                     </div>
-                                    <span className="text-[8px] font-mono text-[var(--nova-muted)]">{g.progress}% complete</span>
+                                    <span className="text-[8px] font-mono text-[var(--nova-muted)]">{g.status === 'completed' ? 100 : g.progress}% complete</span>
+                                    <div className="flex gap-2 mt-2">
+                                        <button
+                                            onClick={async () => {
+                                                await patch(
+                                                    `/api/goals/${g.id}`,
+                                                    { progress: 100, status: 'completed' }
+                                                );
+                                                fetchAll();
+                                            }}
+                                            className="text-[9px] font-mono text-[#00ffcc] border border-[#00ffcc]/30 px-2 py-1 rounded hover:bg-[#00ffcc]/10 transition-all cursor-pointer">
+                                            ✓ COMPLETE
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                await del(`/api/goals/${g.id}`);
+                                                fetchAll();
+                                            }}
+                                            className="text-[9px] font-mono text-red-400 border border-red-400/30 px-2 py-1 rounded hover:bg-red-400/10 transition-all cursor-pointer">
+                                            ✕ DELETE
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -164,9 +186,25 @@ export function TasksPanel() {
                                         <div className={`w-2 h-2 rounded-full ${statusColor(t.status)}`} />
                                         <span className={`text-[10px] font-mono flex-1 ${done ? "line-through text-[var(--nova-muted)]" : "text-[var(--nova-text)]"}`}>{t.title}</span>
                                         {t.due_time && <span className="text-[8px] font-mono text-[var(--nova-muted)]">{t.due_time}</span>}
-                                        {!done && (
-                                            <button onClick={() => completeTask(t.id)} className="text-[8px] font-mono text-[var(--nova-green)] hover:underline cursor-pointer">✓ Complete</button>
-                                        )}
+                                        <button
+                                            onClick={async () => {
+                                                await patch(
+                                                    `/api/tasks/${t.id}`,
+                                                    { status: 'completed' }
+                                                );
+                                                fetchAll();
+                                            }}
+                                            className="text-[9px] font-mono text-[#00ffcc] hover:underline cursor-pointer">
+                                            ✓ Complete
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                await del(`/api/tasks/${t.id}`);
+                                                fetchAll();
+                                            }}
+                                            className="text-[9px] font-mono text-red-400 hover:underline cursor-pointer ml-2">
+                                            ✕
+                                        </button>
                                     </div>
                                 );
                             })}

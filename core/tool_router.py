@@ -21,6 +21,8 @@ class ToolResult:
     requires_approval: bool
 
 class ToolRouter:
+    def __init__(self):
+        self._pending_cleanup = None
     async def route(self, intent: ParsedIntent, context: dict = None) -> ToolResult:
         print(f"[Router] Routing to tool: "
               f"{intent.tool} / intent: {intent.intent}")
@@ -62,6 +64,7 @@ class ToolRouter:
             "skills":         self._handle_skills,
             "data_analysis":  self._handle_data_analysis,
             "security":       self._handle_security,
+            "gmail":          self._handle_gmail,
         }
         
         handler = handlers.get(intent.tool, self._handle_conversation)
@@ -165,7 +168,8 @@ class ToolRouter:
             )
             
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+            import shlex
+            result = subprocess.run(shlex.split(command), shell=False, capture_output=True, text=True, timeout=10)
             output = result.stdout or result.stderr
             output = output[:2000]
             return ToolResult(
@@ -261,41 +265,358 @@ class ToolRouter:
 
     async def _handle_tasks(self, intent: ParsedIntent):
         try:
-            conn = sqlite3.connect("nova_logs.db", check_same_thread=False)
+            import sqlite3, uuid, os
+            from datetime import datetime
             
-            if intent.intent == "task_create":
-                title = intent.params.get("title", "")
-                priority = intent.params.get("priority", "medium")
-                import uuid
+            db_path = os.path.join(
+                os.path.dirname(__file__),
+                "../nova_logs.db"
+            )
+            conn = sqlite3.connect(
+                db_path, 
+                check_same_thread=False
+            )
+            
+            # Ensure tasks table exists
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    priority TEXT DEFAULT 'medium',
+                    status TEXT DEFAULT 'pending',
+                    deadline TEXT,
+                    created_at TEXT DEFAULT 
+                        (datetime('now'))
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS subtasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    order_index INTEGER DEFAULT 0,
+                    FOREIGN KEY (task_id) REFERENCES tasks(id)
+                )
+            """)
+            conn.commit()
+            
+            i = intent.intent
+            p = intent.params
+            
+            if i == "task_create":
+                title = p.get("title", "")
+                priority = p.get("priority", "medium")
+                deadline = p.get("deadline", "")
                 task_id = str(uuid.uuid4())[:8]
                 conn.execute(
-                    "INSERT INTO goals VALUES (?,?,?,?,?)",
-                    (task_id, title, "active", None, datetime.utcnow().isoformat())
+                    "INSERT INTO tasks "
+                    "(id, title, priority, "
+                    "status, deadline) "
+                    "VALUES (?,?,?,?,?)",
+                    (task_id, title, priority,
+                     "pending", deadline)
                 )
                 conn.commit()
+
+                # Generate subtasks via LLM
+                subtask_count = 0
+                try:
+                    from llm import generate_subtasks
+                    subtask_titles = generate_subtasks(
+                        title, priority, deadline
+                    )
+                    for idx, st in enumerate(subtask_titles):
+                        conn.execute(
+                            "INSERT INTO subtasks "
+                            "(task_id, title, status, "
+                            "order_index) "
+                            "VALUES (?,?,?,?)",
+                            (task_id, st, "pending", idx)
+                        )
+                    conn.commit()
+                    subtask_count = len(subtask_titles)
+                except Exception as e:
+                    print("[LLM] Subtask generation skipped "
+                          "- model warming up, try again")
+
+                conn.close()
+
+                sub_msg = ""
+                if subtask_count > 0:
+                    sub_msg = (
+                        f"\n📋 {subtask_count} subtasks "
+                        f"generated automatically."
+                    )
+
                 return ToolResult(
                     success=True,
-                    intent=intent.intent,
-                    output=f"Task created: {title}",
-                    data={"task_id": task_id, "title": title, "priority": priority},
-                    block_type="mission",
+                    intent=i,
+                    output=(
+                        f"✓ Task created: **{title}**"
+                        f"{sub_msg}"
+                    ),
+                    data={
+                        "task_id": task_id,
+                        "title": title,
+                        "priority": priority,
+                        "subtasks_generated": subtask_count
+                    },
+                    block_type="text",
                     risk="LOW",
                     requires_approval=False
                 )
-            else:
+            
+            elif i == "task_delete":
+                title_query = p.get("title", "").lower()
+                # Find matching task
                 rows = conn.execute(
-                    "SELECT id, description, status FROM goals WHERE status='active' LIMIT 10"
+                    "SELECT id, title FROM tasks "
+                    "WHERE status != 'deleted'"
                 ).fetchall()
-                tasks = [{"id": r[0], "title": r[1], "status": r[2]} for r in rows]
+                match = None
+                for r in rows:
+                    if title_query in r[1].lower():
+                        match = r
+                        break
+                if match:
+                    conn.execute(
+                        "UPDATE tasks SET "
+                        "status='deleted' WHERE id=?",
+                        (match[0],)
+                    )
+                    conn.commit()
+                    conn.close()
+                    return ToolResult(
+                        success=True,
+                        intent=i,
+                        output=f"✓ Deleted task: **{match[1]}**",
+                        data={},
+                        block_type="text",
+                        risk="LOW",
+                        requires_approval=False
+                    )
+                else:
+                    conn.close()
+                    return ToolResult(
+                        success=False,
+                        intent=i,
+                        output=f"No task found matching: {title_query}",
+                        data={},
+                        block_type="text",
+                        risk="LOW",
+                        requires_approval=False
+                    )
+            
+            elif i == "task_complete":
+                title_query = p.get("title", "").lower()
+                rows = conn.execute(
+                    "SELECT id, title FROM tasks "
+                    "WHERE status != 'deleted'"
+                ).fetchall()
+                match = None
+                for r in rows:
+                    if title_query in r[1].lower():
+                        match = r
+                        break
+                if match:
+                    conn.execute(
+                        "UPDATE tasks SET "
+                        "status='completed' WHERE id=?",
+                        (match[0],)
+                    )
+                    conn.commit()
+                    conn.close()
+                    return ToolResult(
+                        success=True,
+                        intent=i,
+                        output=f"✓ Completed: **{match[1]}**",
+                        data={},
+                        block_type="text",
+                        risk="LOW",
+                        requires_approval=False
+                    )
+                else:
+                    conn.close()
+                    return ToolResult(
+                        success=False,
+                        intent=i,
+                        output=f"No task found matching: {title_query}",
+                        data={},
+                        block_type="text",
+                        risk="LOW",
+                        requires_approval=False
+                    )
+            
+            elif i == "mission_plan":
+                goal = p.get("goal", "")
+                
+                # Use AI to break into subtasks
+                subtasks = []
+                try:
+                    import sys
+                    import os
+                    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    from llm import generate_subtasks
+                    subtasks = generate_subtasks(goal)
+                    if not subtasks:
+                        raise ValueError("No subtasks created")
+                    print(f"[LLM] ✓ Generated {len(subtasks)} subtasks for: {goal}")
+                except Exception as e:
+                    print(f"[Tasks] AI error: {e}")
+                    subtasks = [
+                        f"Research {goal}",
+                        f"Plan {goal}",
+                        f"Execute {goal}",
+                        f"Review {goal}"
+                    ]
+                
+                # Create main task + subtasks in DB
+                try:
+                    import sqlite3, uuid, os
+                    db_path = os.path.join(
+                        os.path.dirname(__file__),
+                        "../nova_logs.db"
+                    )
+                    task_id = str(uuid.uuid4())[:8]
+                    conn = sqlite3.connect(db_path)
+                    
+                    try:
+                        conn.execute(
+                            "ALTER TABLE tasks ADD COLUMN "
+                            "repeat TEXT DEFAULT ''"
+                        )
+                    except:
+                        pass
+
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS tasks (
+                            id TEXT PRIMARY KEY,
+                            title TEXT NOT NULL,
+                            priority TEXT DEFAULT 'medium',
+                            status TEXT DEFAULT 'pending',
+                            deadline TEXT,
+                            repeat TEXT DEFAULT '',
+                            created_at TEXT DEFAULT 
+                                (datetime('now'))
+                        )
+                    """)
+                    conn.execute(
+                        "INSERT INTO tasks "
+                        "(id, title, priority, status) "
+                        "VALUES (?,?,?,?)",
+                        (task_id, goal, "high", "pending")
+                    )
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS subtasks (
+                            id TEXT PRIMARY KEY,
+                            task_id TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            status TEXT DEFAULT 'pending',
+                            created_at TEXT DEFAULT 
+                                (datetime('now'))
+                        )
+                    """)
+                    for step in subtasks:
+                        sub_id = str(uuid.uuid4())[:8]
+                        conn.execute(
+                            "INSERT INTO subtasks "
+                            "(id, task_id, title) VALUES (?,?,?)",
+                            (sub_id, task_id, step)
+                        )
+                    conn.commit()
+                except Exception as e:
+                    print(f"[Tasks] DB Error during mission_plan task creation: {e}")
+                finally:
+                    conn.close()
+                
+                steps_text = "\n".join(
+                    f"{j+1}. {s}" 
+                    for j, s in enumerate(subtasks)
+                )
+                out = (
+                    f"**Mission Plan: {goal}**\n\n"
+                    f"{steps_text}\n\n"
+                    f"✓ Created {len(subtasks)} subtasks. "
+                    f"Check Tasks tab."
+                )
+                
                 return ToolResult(
                     success=True,
-                    intent=intent.intent,
-                    output=f"Found {len(tasks)} active tasks.",
-                    data={"tasks": tasks},
-                    block_type="tasks",
+                    intent=i,
+                    output=out,
+                    data={
+                        "task_id": task_id,
+                        "subtasks": subtasks
+                    },
+                    block_type="text",
                     risk="LOW",
                     requires_approval=False
                 )
+
+            elif i == "suggest_task":
+                title = p.get("title", "")
+                out = f"Create task: **{title}**?"
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=out,
+                    data={
+                        "approval_action": "task_create",
+                        "title": title,
+                        "suggest": True
+                    },
+                    block_type="task_suggestion",
+                    risk="LOW",
+                    requires_approval=False
+                )
+            
+            else:
+                # task_list
+                rows = conn.execute(
+                    "SELECT id, title, priority, "
+                    "status, deadline FROM tasks "
+                    "WHERE status NOT IN "
+                    "('deleted') "
+                    "ORDER BY created_at DESC "
+                    "LIMIT 10"
+                ).fetchall()
+                tasks = [
+                    {
+                        "id": r[0], "title": r[1],
+                        "priority": r[2], 
+                        "status": r[3],
+                        "deadline": r[4]
+                    } for r in rows
+                ]
+                conn.close()
+                
+                if not tasks:
+                    out = "No active tasks."
+                else:
+                    lines = [
+                        f"{'✓' if t['status']=='completed' else '●'} "
+                        f"**{t['title']}** "
+                        f"[{t['priority']}]"
+                        + (f" — due {t['deadline']}" 
+                           if t['deadline'] else "")
+                        for t in tasks
+                    ]
+                    out = (
+                        f"**Your Tasks ({len(tasks)}):**\n"
+                        + "\n".join(lines)
+                    )
+                
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=out,
+                    data={"tasks": tasks},
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False
+                )
+        
         except Exception as e:
             return self._error(intent, str(e))
 
@@ -461,6 +782,8 @@ class ToolRouter:
                     )
                 else:
                     return self._error(intent, f"Could not open {app}. Is it installed?")
+            else:
+                return self._error(intent, "No URL or application specified.")
         except Exception as e:
             return self._error(intent, str(e))
 
@@ -486,23 +809,11 @@ precise, efficient, mission-focused. Keep responses
 concise and operational. Never break character."""
         
         try:
-            # Try to route through the core LLM wrapper
-            try:
-                from core.llm import llm
-                response = await llm.generate_summary(f"{JARVIS_SYSTEM}\n\nUser: {intent.raw_message}")
-            except Exception:
-                # Fallback directly to local Ollama if core.llm isn't available
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        "http://localhost:11434/api/generate",
-                        json={
-                            "model": "llama3.2",
-                            "prompt": f"{JARVIS_SYSTEM}\n\nUser: {intent.raw_message}",
-                            "stream": False
-                        },
-                        timeout=30.0
-                    )
-                    response = resp.json().get("response", "")
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from llm import _chat
+            response = _chat(system=JARVIS_SYSTEM, user=intent.raw_message)
                     
             return ToolResult(
                 success=True,
@@ -662,7 +973,118 @@ concise and operational. Never break character."""
         p = intent.params
         
         try:
-            if i == "file_create":
+            if i == "ai_cleanup_analyze":
+                folder = p.get("folder", "~/Desktop")
+                
+                from core.file_manager import file_manager
+                
+                # Store report in memory for approval
+                report = await file_manager.ai_cleanup_analysis(
+                    folder
+                )
+                
+                # Store pending report
+                import json, os
+                cache_path = os.path.expanduser(
+                    "~/.nova/pending_cleanup.json"
+                )
+                with open(cache_path, 'w') as f:
+                    # Remove non-serializable data
+                    json.dump(report, f, indent=2, 
+                              default=str)
+                print(f"[Cleanup] Report saved: "
+                      f"{len(report.get('junk',[]))} junk, "
+                      f"{len(report.get('to_archive',[]))} archive, "
+                      f"{len(report.get('to_organize',[]))} organize")
+                
+                if "error" in report:
+                    out = f"Error: {report['error']}"
+                else:
+                    out = (
+                        f"**AI Cleanup Analysis: "
+                        f"{report['folder']}**\n"
+                        f"{'─' * 40}\n\n"
+                        f"📊 **Scanned:** "
+                        f"{report['total_files']} files "
+                        f"({report['total_size_mb']} MB)\n\n"
+                        f"🗑 **Junk to delete:** "
+                        f"{len(report['junk'])} files "
+                        f"({report['junk_size_mb']} MB)\n"
+                        f"♻️ **Duplicates:** "
+                        f"{len(report['duplicates'])} files\n"
+                        f"📦 **Archive** "
+                        f"(30+ days old): "
+                        f"{len(report['to_archive'])} files "
+                        f"({report['archive_size_mb']} MB)\n"
+                        f"📁 **Organize:** "
+                        f"{len(report['to_organize'])} files\n\n"
+                        f"**AI Assessment:**\n"
+                        f"{report['ai_summary']}\n\n"
+                        f"─────────────────────────────\n"
+                        f"Type **'yes execute cleanup'** "
+                        f"to proceed or ignore to cancel."
+                    )
+                
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=out,
+                    data={
+                        "approval_action": "ai_cleanup_execute",
+                        "pending_report": True,
+                        "folder": report.get("folder", ""),
+                        "stats": {
+                            "junk": len(report.get("junk", [])),
+                            "duplicates": len(report.get("duplicates", [])),
+                            "archive": len(report.get("to_archive", [])),
+                            "organize": len(report.get("to_organize", [])),
+                            "freed_mb": report.get("junk_size_mb", 0)
+                        }
+                    },
+                    block_type="cleanup_approval",
+                    risk="MEDIUM",
+                    requires_approval=True
+                )
+
+            elif i == "ai_cleanup_execute":
+                import json, os
+                cache_path = os.path.expanduser(
+                    "~/.nova/pending_cleanup.json"
+                )
+                report = None
+                if os.path.exists(cache_path):
+                    try:
+                        with open(cache_path) as f:
+                            report = json.load(f)
+                        print(f"[Cleanup] Loaded report: "
+                              f"{report.get('folder')}")
+                    except Exception as e:
+                        print(f"[Cleanup] Load error: {e}")
+                if not report:
+                    out = ("No pending cleanup report. "
+                           "Run 'clean my desktop' first.")
+                else:
+                    from core.file_manager import file_manager
+                    out = await file_manager.ai_cleanup_execute(
+                        report
+                    )
+                    # After ai_cleanup_execute completes
+                    try:
+                        os.remove(cache_path)
+                    except:
+                        pass
+                
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=out,
+                    data={},
+                    block_type="text",
+                    risk="MEDIUM",
+                    requires_approval=False
+                )
+
+            elif i == "file_create":
                 out = capabilities.create_file(
                     p.get("path", "~/Desktop/nova.txt"),
                     p.get("content", "")
@@ -694,7 +1116,14 @@ concise and operational. Never break character."""
         p = intent.params
         
         try:
-            if i == "web_search":
+            if i in ["get_news", "news_fetch"]:
+                category = p.get("category") or p.get("topic") or "general"
+                out = await capabilities.get_news(category)
+            elif i == "intel_briefing":
+                out = await capabilities.intel_briefing(
+                    p.get("query", "global threats")
+                )
+            elif i == "web_search":
                 out = await capabilities.web_search(
                     p.get("query", "")
                 )
@@ -990,6 +1419,51 @@ concise and operational. Never break character."""
             )
         except Exception as e:
             return self._error(intent, str(e))
+
+    async def _handle_gmail(self, intent: ParsedIntent) -> ToolResult:
+        from tools.gmail_tool import GmailTool
+        gmail = GmailTool()
+        i = intent.intent
+        p = intent.params
+        out = ""
+        
+        try:
+            if i == "summarize_inbox":
+                out = gmail.summarize_inbox()
+            elif i == "read_emails":
+                res = gmail.read_emails(sender=p.get("sender"))
+                if res.get("status") == "success":
+                    emails = res.get("data", [])
+                    if not emails:
+                        out = "No unread emails found."
+                    else:
+                        out = "Unread Emails:\n" + "\n".join([f"From: {e['from']} | Subj: {e['subject']}" for e in emails])
+                else:
+                    out = res.get("message", "Error reading emails.")
+            elif i == "send_email":
+                res = gmail.send_email(
+                    to=p.get("to", ""),
+                    subject=p.get("subject", "Automated Message"),
+                    body=p.get("body", "Sent from NOVA.")
+                )
+                if res.get("status") == "sent":
+                    out = f"Email sent successfully to {p.get('to')}."
+                else:
+                    out = f"Failed to send email: {res.get('error')}"
+            else:
+                out = f"Unknown gmail action: {i}"
+                
+            return ToolResult(
+                success=True,
+                intent=i,
+                output=out,
+                data={"action": i},
+                block_type="text",
+                risk="LOW",
+                requires_approval=False
+            )
+        except Exception as e:
+            return self._error(intent, f"Gmail tool error: {e}")
 
     async def _handle_skills(self,
             intent: ParsedIntent) -> ToolResult:

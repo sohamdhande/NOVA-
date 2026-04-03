@@ -143,7 +143,11 @@ class NovaApp:
         """Scan email inbox for actionable items."""
         from core.watcher import InboxWatcher
         print("[NOVA] Scanning inbox...")
-        watcher = InboxWatcher()
+        watcher = InboxWatcher(
+            memory_tool=self.memory_tool,
+            notion_tool=self.notion_tool,
+            pdf_tool=self.pdf_tool
+        )
         report = watcher.scan()
         print(report)
     
@@ -309,7 +313,7 @@ class NovaApp:
                         status_icon = "✓" if r["status"] == "success" else "✗"
                         print(f"    {status_icon} Step {j + 1} [{r['domain']}/{r['action']}]: {r['response'][:100]}")
                 
-                final_response = result["response"]
+                final_response = result.get("response", result) if isinstance(result, dict) else result
                 print(final_response)
                 self.speak(final_response)
                 

@@ -120,12 +120,13 @@ class SkillEngine:
 
     async def _run_step(self, step: SkillStep,
                          context: str) -> str:
-        import subprocess, httpx
+        import subprocess
 
         if step.action == "shell":
+            import shlex
             cmd = step.params.get("command", "")
             result = subprocess.run(
-                cmd, shell=True,
+                shlex.split(cmd), shell=False,
                 capture_output=True, text=True,
                 timeout=30
             )
@@ -133,22 +134,15 @@ class SkillEngine:
             return out.strip()[:500] or "(no output)"
 
         elif step.action == "llm":
+            from llm import _chat
             prompt = step.params.get("prompt", "")
             if context and context != prompt:
                 prompt = (f"{prompt}\n\n"
                          f"Context:\n{context}")
-            async with httpx.AsyncClient() as c:
-                r = await c.post(
-                    "http://localhost:11434"
-                    "/api/generate",
-                    json={
-                        "model": "llama3.2",
-                        "prompt": prompt,
-                        "stream": False
-                    },
-                    timeout=60
-                )
-                return r.json().get("response", "")
+            return _chat(
+                system="You are a helpful assistant.",
+                user=prompt
+            )
 
         elif step.action == "system":
             cmd = step.params.get("command", "")

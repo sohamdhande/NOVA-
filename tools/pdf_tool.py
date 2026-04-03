@@ -1,10 +1,5 @@
 import os
-import requests
 import fitz  # PyMuPDF
-
-# Ollama configuration (same as main LLM module)
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.2"
 
 
 class PDFTool:
@@ -68,16 +63,15 @@ class PDFTool:
             f"Document:\n{text}\n\nAnswers:"
         )
 
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.3}
-        }
-
-        response = requests.post(OLLAMA_URL, json=payload)
-        data = response.json()
-        return data["response"].strip()
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from llm import _chat
+        try:
+            return _chat(system="", user=prompt).strip()
+        except Exception as e:
+            print(f"[PDFTool] LLM Error: {e}")
+            return "Failed to extract topics."
 
     def _synthesize_briefing(self, topics: str, strict: bool) -> str:
         """Pass 2: Write cohesive briefing from extracted topics only."""
@@ -112,16 +106,15 @@ class PDFTool:
                 f"Information:\n{topics}\n\nSystem overview:"
             )
 
-        payload = {
-            "model": MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.4 if not strict else 0.5}
-        }
-
-        response = requests.post(OLLAMA_URL, json=payload)
-        data = response.json()
-        return data["response"].strip()
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from llm import _chat
+        try:
+            return _chat(system="", user=prompt).strip()
+        except Exception as e:
+            print(f"[PDFTool] LLM Error: {e}")
+            return "Failed to synthesize briefing."
 
     def _has_procedural_language(self, text: str) -> bool:
         """Check if text still contains procedural/sequential language."""
