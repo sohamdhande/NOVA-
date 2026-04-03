@@ -1,6 +1,6 @@
 # NOVA - Autonomous Productivity Operator
 
-**Version:** 2.0  
+**Version:** 4.0  
 **Status:** ✅ Production Ready  
 **Python:** 3.14+
 
@@ -32,14 +32,12 @@ pip install -r requirements.txt
    - Add `credentials.json` for Google Calendar
    - Set `NOTION_TOKEN` in `.env` for Notion integration
 
-2. **LLM Server**
-   ```bash
-   # Start Ollama
-   ollama serve
-   
-   # Pull the model (first time only)
-   ollama pull mistral:7b-instruct
-   ```
+2. **LLM Engine (Groq / Ollama)**
+   - Set `GROQ_API_KEY` in `.env` for blazing-fast inference via Groq (Primary)
+   - *Optional:* Start Local Ollama fallback by running `ollama serve`
+
+3. **External APIs**
+   - Set `TAVILY_API_KEY` in `.env` for multi-tier web searches and intelligence briefings
 
 ### Run NOVA
 
@@ -78,10 +76,11 @@ python3 nova.py
 - **Natural queries** - "What do I remember about X?"
 
 ### ✅ Tool Integration
-- **Google Calendar** - Create events, read schedule
+- **Google Workspace** - Calendar event management and full Gmail integration (Read / Send)
+- **Web Intelligence** - Multi-node real-time web search (Tavily + DuckDuckGo)
 - **Notion** - Manage tasks, track progress
-- **PDF** - Extract text, summarize documents
-- **System** - Morning briefings, telemetry
+- **PDF & Local Files** - Extract text, summarize documents
+- **System** - Security scanning, process tracking, OS operations
 
 ### ✅ Safety & Observability
 - **Guardrails** - Daily mutation limits (3 creates, 5 updates)
@@ -133,6 +132,19 @@ Found 2 task(s).
 ```
 NOVA > What's on my calendar today?
 Found 3 event(s) for today.
+```
+
+### Communications & Web Intelligence
+```
+NOVA > Check my inbox
+Inbox Briefing: 3 new unread emails...
+
+NOVA > Send an email to operative@sector.com subject Debrief body File attached
+✓ Email sent to operative@sector.com.
+
+NOVA > Give me an intel briefing on today's geopolitics
+[CLASSIFIED] Operative Briefing
+SECTION 1: GEOPOLITICAL THREAT ASSESSMENT...
 ```
 
 ## Architecture
@@ -231,6 +243,11 @@ DAILY_UPDATE_LIMIT = 5          # Max updates per day
 - `summarize` - Summarize PDF
 - `extract` - Extract text
 
+### Communications & Web (v4)
+- `gmail` - Send emails, summarize inbox, check unread threads
+- `web_search` - Query Tavily / DuckDuckGo for live internet data
+- `intel_briefing` - Synthesize formatted briefing reports
+
 ## Performance
 
 - **Average command:** 5.4s
@@ -324,10 +341,10 @@ For issues, questions, or contributions:
 ## Credits
 
 **Author:** Soham Dhande  
-**Version:** 2.0  
-**Release Date:** February 14, 2026  
+**Version:** 4.0  
+**Release Date:** April 2026  
 **Status:** Production Ready
 
 ---
 
-**Built with:** Python, Ollama, Sentence Transformers, ChromaDB, Google APIs, Notion API
+**Built with:** Python, Groq API, Tavily, Google Workspace APIs, Sentence Transformers, ChromaDB
