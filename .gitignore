@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.env
+.venv
+env.bak
+venv.bak
+
+# Node / Dashboard
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.npm/
+dashboard/build/
+.eslintcache
+
+# Google Cloud APIs / Credentials
+credentials.json
+token.json
+client_secret.json
+
+# Databases & Local Storage
+# (Assuming N.O.V.A has sqlite / memory stores here)
+data/
+*.sqlite3
+*.db
+chromadb/
+
+# Temporary Files / Scripts / Logs
+*.log
+tmp/
+temp/
+npm_audit.json
+bandit_output.json
+fix_intent_parser.py
+
+# OS / MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
