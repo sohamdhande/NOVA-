@@ -175,12 +175,67 @@ class Controller:
         # -----------------------------------------------------------
         # STEP 1: TRIM INPUT
         # -----------------------------------------------------------
+        if command:
+            BLOCKED_PHRASES = [
+                "scan", "threat", "virus", "malware", "find threat",
+                "check files", "scan files", "security scan",
+                "find files that", "threat to my", "dangerous files"
+            ]
+            if any(phrase in command.lower() for phrase in BLOCKED_PHRASES):
+                return "I don't have file scanning capabilities. Use a real antivirus tool like Malwarebytes or macOS XProtect."
+                
         command = command.strip()
         
         # Empty input already handled by CLI - this is defensive
         if not command:
             return self._fallback_chat(command)
+            
+        # Merge Clarification if pending
+        if hasattr(self, '_clarity_pending') and self._clarity_pending:
+            original_command = self._clarity_pending['command']
+            command = f"{original_command}. Additional details: {command}"
+            self._clarity_pending = None
         
+        # -----------------------------------------------------------
+        # STEP 4.5: SKILL LOADER
+        # -----------------------------------------------------------
+        try:
+            from core.skill_loader import run_with_skill
+            skill_result = run_with_skill(command)
+            if skill_result:
+                self._log_execution(
+                    command=command,
+                    intent="skill_routing",
+                    domain="skills",
+                    action="execute_skill",
+                    risk="low",
+                    status="success",
+                    response=skill_result
+                )
+                return {
+                    "intent": "skill_routing",
+                    "domain": "skills",
+                    "action": "execute",
+                    "risk": "low",
+                    "status": "success",
+                    "response": skill_result
+                }
+        except Exception as e:
+            if config.DEBUG: print(f"[Controller] Skill Loader error: {e}")
+
+        # -----------------------------------------------------------
+        # STEP 4.6: SCREEN MEMORY PREPEND
+        # -----------------------------------------------------------
+        try:
+            from tools.screen_tool import SCREEN_MEMORY
+            import time
+            last_screen = SCREEN_MEMORY.get('last')
+            if last_screen and time.time() - last_screen['timestamp'] < 60:
+                ctx = last_screen['context']
+                command = f"[Screen context: {ctx.get('app')} — {ctx.get('task')}] {command}"
+        except Exception as e:
+            if getattr(config, 'DEBUG', False): print(f"[Controller] Screen Context error: {e}")
+
         # -----------------------------------------------------------
         # STEP 5: PLANNER INVOCATION
         # -----------------------------------------------------------
@@ -290,6 +345,26 @@ class Controller:
         # -----------------------------------------------------------
         # STEP 8: EXECUTION ROUTING
         # -----------------------------------------------------------
+        
+        # Clarity Engine validation before execution
+        try:
+            from core.clarity_engine import needs_clarification
+            question = needs_clarification(command, parsed)
+            if question:
+                self._clarity_pending = {
+                    "command": command,
+                    "intent": parsed
+                }
+                return {
+                    "intent": "clarification_needed",
+                    "domain": "system",
+                    "action": "ask",
+                    "risk": "low",
+                    "status": "success",
+                    "response": question
+                }
+        except Exception as e:
+            if config.DEBUG: print(f"[Controller] Clarity error: {e}")
         
         # Multi-step execution
         if parsed.get("steps"):

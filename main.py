@@ -212,6 +212,46 @@ async def start_system():
     except Exception as e:
         print(f"[NOVA] Voice unavailable: {e}")
 
+    # Start reminder daemon (async background task)
+    try:
+        from core.reminder_daemon import reminder_loop
+        asyncio.create_task(reminder_loop())
+        print("[NOVA] ✓ Reminder daemon running")
+    except Exception as e:
+        print(f"[NOVA] ✗ Reminder daemon failed: {e}")
+
+    # Start automated morning briefing scheduler
+    try:
+        from core.briefing_scheduler import start_briefing_scheduler
+        async def send_briefing_to_dashboard(text: str):
+            from core.event_bus import event_bus, NovaEvent
+            await event_bus.publish(NovaEvent(
+                source="scheduler",
+                type="morning_briefing",
+                payload={"message": text},
+                priority=8
+            ))
+        asyncio.create_task(start_briefing_scheduler(send_briefing_to_dashboard))
+        print("[NOVA] ✓ Briefing scheduler running")
+    except Exception as e:
+        print(f"[NOVA] ✗ Briefing scheduler failed: {e}")
+
+    # Start System Resource Monitor
+    try:
+        from core.resource_monitor import start_resource_monitor
+        async def send_stats_to_dashboard(event_type: str, stats: dict):
+            from core.event_bus import event_bus, NovaEvent
+            await event_bus.publish(NovaEvent(
+                source="resource_monitor",
+                type=event_type,
+                payload=stats,
+                priority=5
+            ))
+        asyncio.create_task(start_resource_monitor(send_stats_to_dashboard))
+        print("[NOVA] ✓ Resource monitor running")
+    except Exception as e:
+        print(f"[NOVA] ✗ Resource monitor failed: {e}")
+
     # 8. API Server
     print("[NOVA] ✓ API Server live on localhost:8000")
     print("="*50 + "\n")
@@ -237,5 +277,5 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         print("\n[NOVA] Shutdown requested. Goodbye.")

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useApi } from "../../hooks/useApi";
 import { useNovaStore } from "../../store/novaStore";
+import { useEventBus } from "../../hooks/useEventBus";
 import { ChatMessage, type NovaMessage } from "../chat/ChatMessage";
 import { FileAutocomplete } from '../chat/FileAutocomplete';
 import { CommandSuggestions } from '../chat/CommandSuggestions';
@@ -35,6 +36,8 @@ export function HQPanel() {
     const [showAutocomplete, setShowAutocomplete] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(new Date());
     const [lastVoiceCommand, setLastVoiceCommand] = useState("");
+    const { connected, lastEvent } = useEventBus();
+    const [resourceStats, setResourceStats] = useState<any>(null);
     const chatBoxRef = useRef<HTMLDivElement>(null);
 
     const fetchAll = useCallback(async () => {
@@ -59,6 +62,12 @@ export function HQPanel() {
     }, [get]);
 
     useEffect(() => { fetchAll(); const iv = setInterval(fetchAll, 30000); return () => clearInterval(iv); }, [fetchAll]);
+
+    useEffect(() => {
+        if (lastEvent?.type === "resource_stats") {
+            setResourceStats(lastEvent.payload);
+        }
+    }, [lastEvent]);
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
@@ -295,6 +304,29 @@ export function HQPanel() {
                     <button onClick={fetchAll} className="text-[#00ffcc] hover:text-white transition-colors text-sm cursor-pointer ml-2 hover:rotate-180 duration-500 ease-in-out">⟳</button>
                 </div>
             </div>
+
+            {resourceStats && (
+                <div className="flex justify-between items-center bg-[#010a0a]/80 backdrop-blur-md border border-[rgba(0,255,204,0.15)] rounded-lg px-4 py-2 mb-6 shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
+                    <div className="flex gap-6">
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-mono tracking-widest text-[#8a9a9a]">NOVA CPU</span>
+                            <span className={`text-xs font-mono font-bold ${resourceStats.cpu_percent > 40 ? 'text-red-400' : 'text-[#00ffcc]'}`}>{resourceStats.cpu_percent}%</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-mono tracking-widest text-[#8a9a9a]">NOVA RAM</span>
+                            <span className={`text-xs font-mono font-bold ${resourceStats.memory_mb > 500 ? 'text-amber-400' : 'text-[#e2e8f0]'}`}>{resourceStats.memory_mb} MB</span>
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-mono tracking-widest text-[#8a9a9a]">SYS FREE</span>
+                            <span className={`text-xs font-mono font-bold ${resourceStats.system_memory_free_gb < 1 ? 'text-red-400' : 'text-[#e2e8f0]'}`}>{resourceStats.system_memory_free_gb} GB</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#00ffcc] animate-pulse"></span>
+                        <span className="text-[9px] font-mono tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-[#00ffcc] to-teal-200">MONITOR ACTIVE</span>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-5 gap-8 h-full">
                 {/* LEFT COLUMN */}

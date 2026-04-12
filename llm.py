@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import os
 from datetime import datetime
@@ -476,22 +479,47 @@ def generate_summary(context: dict) -> str:
         if tasks else "  No open tasks."
     )
 
+    # Fetch weather for morning briefing
+    weather_line = ""
+    weather = context.get("weather")
+    if weather and isinstance(weather, dict):
+        weather_line = f"Weather: {weather.get('temp')}°C, {weather.get('condition')}, {weather.get('humidity')}% humidity\n\n"
+    else:
+        try:
+            import asyncio
+            from tools.weather_tool import get_weather
+            weather = asyncio.get_event_loop().run_until_complete(get_weather("Pune"))
+            weather_line = (
+                f"Weather: {weather['temp']}°C, {weather['condition']}, {weather['humidity']}% humidity\n\n"
+            )
+        except Exception:
+            weather_line = "  Weather data unavailable."
+
     user_msg = (
         f"CURRENT DATE:\n{date_str}\n\n"
+        f"WEATHER:\n{weather_line}\n\n"
         f"CALENDAR EVENTS:\n{events_block}\n\n"
         f"OPEN TASKS:\n{tasks_block}"
     )
 
     try:
-        return _chat(
+        raw_summary = _chat(
             system=_BRIEFING_SYSTEM.format(current_date=date_str),
             user=user_msg,
             model=MODEL_LARGE,
             temperature=0.3,
         ).strip()
+        
+        # Prepend weather line if it doesn't already exist in the output
+        if weather_line and "Weather:" not in raw_summary:
+            return weather_line + raw_summary
+        return raw_summary
+
     except Exception:
         # Deterministic fallback when both keys fail
         parts = [f"Briefing for {date_str}."]
+        if weather_line:
+            parts.append(weather_line.strip())
         if events:
             parts.append(f"Today's schedule: {', '.join(e['title'] for e in events)}.")
         else:

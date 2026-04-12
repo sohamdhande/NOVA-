@@ -367,19 +367,100 @@ async def biometric_verify():
 # STUB - replace with real data
 @router.get("/metrics")
 def get_metrics():
+    import psutil, time, platform
+
+    # CPU
+    cpu_percent = psutil.cpu_percent(interval=0.3)
+    cpu_count = psutil.cpu_count()
+    cpu_freq = psutil.cpu_freq()
+    load_avg = psutil.getloadavg() if hasattr(psutil, 'getloadavg') else (0, 0, 0)
+
+    # Memory
+    mem = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+
+    # Disk
+    disk = psutil.disk_usage('/')
+
+    # Battery
+    battery = psutil.sensors_battery()
+    bat_percent = battery.percent if battery else 100
+    bat_charging = battery.power_plugged if battery else False
+    bat_secs_left = battery.secsleft if battery and battery.secsleft > 0 else None
+
+    # Network
+    net = psutil.net_io_counters()
+    # Store previous for delta calculation
+    if not hasattr(get_metrics, '_prev_net'):
+        get_metrics._prev_net = net
+        get_metrics._prev_time = time.time()
+    
+    dt = max(time.time() - get_metrics._prev_time, 0.1)
+    up_kb = round((net.bytes_sent - get_metrics._prev_net.bytes_sent) / 1024 / dt, 1)
+    down_kb = round((net.bytes_recv - get_metrics._prev_net.bytes_recv) / 1024 / dt, 1)
+    get_metrics._prev_net = net
+    get_metrics._prev_time = time.time()
+
+    # Top processes by CPU
+    procs = []
+    for p in psutil.process_iter(['name', 'cpu_percent', 'pid', 'memory_percent']):
+        try:
+            info = p.info
+            if info['cpu_percent'] and info['cpu_percent'] > 0.1:
+                procs.append({
+                    "name": info['name'] or "unknown",
+                    "cpu": round(info['cpu_percent'], 1),
+                    "pid": info['pid'],
+                    "mem": round(info.get('memory_percent', 0) or 0, 1)
+                })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    procs.sort(key=lambda x: x['cpu'], reverse=True)
+    procs = procs[:12]
+
+    # Uptime
+    boot_time = psutil.boot_time()
+    uptime_secs = int(time.time() - boot_time)
+    uptime_hours = uptime_secs // 3600
+    uptime_mins = (uptime_secs % 3600) // 60
+
+    # Temperatures (macOS may not support this)
+    temps = {}
+    try:
+        temp_info = psutil.sensors_temperatures()
+        if temp_info:
+            for name, entries in temp_info.items():
+                if entries:
+                    temps[name] = round(entries[0].current, 1)
+    except (AttributeError, Exception):
+        pass
+
     return JSONResponse(content={
-        "cpu": 34.5,
-        "ram": 61.2,
-        "disk": 48.0,
-        "battery": 87,
-        "battery_charging": False,
-        "processes": [
-            {"name": "Python", "cpu": 12.3, "pid": 1234},
-            {"name": "Ollama", "cpu": 8.1, "pid": 5678},
-            {"name": "Chrome", "cpu": 5.4, "pid": 9012}
-        ],
-        "network_up_kb": 120,
-        "network_down_kb": 540
+        "cpu": round(cpu_percent, 1),
+        "cpu_count": cpu_count,
+        "cpu_freq_mhz": round(cpu_freq.current, 0) if cpu_freq else 0,
+        "load_avg": [round(l, 2) for l in load_avg],
+        "ram": round(mem.percent, 1),
+        "ram_used_gb": round(mem.used / (1024**3), 1),
+        "ram_total_gb": round(mem.total / (1024**3), 1),
+        "swap_percent": round(swap.percent, 1),
+        "swap_used_gb": round(swap.used / (1024**3), 1),
+        "disk": round(disk.percent, 1),
+        "disk_used_gb": round(disk.used / (1024**3), 1),
+        "disk_total_gb": round(disk.total / (1024**3), 1),
+        "battery": bat_percent,
+        "battery_charging": bat_charging,
+        "battery_mins_left": round(bat_secs_left / 60) if bat_secs_left else None,
+        "processes": procs,
+        "network_up_kb": max(0, up_kb),
+        "network_down_kb": max(0, down_kb),
+        "net_sent_gb": round(net.bytes_sent / (1024**3), 2),
+        "net_recv_gb": round(net.bytes_recv / (1024**3), 2),
+        "uptime": f"{uptime_hours}h {uptime_mins}m",
+        "uptime_hours": uptime_hours,
+        "temps": temps,
+        "platform": platform.platform(),
+        "hostname": platform.node(),
     })
 
 
@@ -1225,7 +1306,10 @@ async def chat(request: Request):
         msg_l = message.lower()
         if any(p in msg_l for p in [
             "word doc", "word document", ".docx",
-            "as a doc", "as a document"
+            "as a doc", "as a document",
+            "write a report", "create report",
+            "make a report", "make document",
+            "write document", "in word format"
         ]) and intent.tool != "documents":
             intent.intent = "create_docx"
             intent.tool = "documents"
@@ -1241,11 +1325,26 @@ async def chat(request: Request):
 
         if any(p in msg_l for p in [
             "presentation", "powerpoint", "slides",
-            ".pptx"
+            ".pptx", "make a ppt", "create ppt",
+            "make ppt", "ppt on ", "ppt about ",
+            "make slides"
         ]) and intent.tool != "documents":
             intent.intent = "create_pptx"
             intent.tool = "documents"
             intent.params = {"instruction": message}
+
+        if any(p in msg_l for p in [
+            "make a pdf", "create a pdf", "generate a pdf",
+            "make pdf", "create pdf", "generate pdf",
+            "pdf of ", "pdf for ", "pdf about ",
+            "pdf on ", "write a pdf",
+            "as a pdf", "in pdf", "pdf file",
+            "pdf notes", "notes pdf", "pdf document"
+        ]) and intent.tool != "documents":
+            intent.intent = "create_pdf"
+            intent.tool = "documents"
+            intent.params = {"instruction": message}
+            print(f"[CHAT] Override → documents/create_pdf")
             
         print(f"[CHAT] Message: '{message}'")
         print(f"[CHAT] Tool: {intent.tool}")

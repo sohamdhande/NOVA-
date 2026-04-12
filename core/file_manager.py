@@ -555,8 +555,10 @@ class FileManager:
             import os
             sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             from llm import _chat
+            from core.personality import get_system_prefix
+            
             ai_summary = _chat(
-                system="You are an AI assistant analyzing file folders.",
+                system=get_system_prefix() + "\n\nYou are an AI assistant analyzing file folders.",
                 user=summary_prompt
             )
         except Exception as e:

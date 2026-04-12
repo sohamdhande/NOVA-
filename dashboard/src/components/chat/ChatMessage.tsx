@@ -6,27 +6,7 @@ import { MissionBlock } from './blocks/MissionBlock';
 import { ApprovalBlock } from './blocks/ApprovalBlock';
 import { ErrorBlock } from './blocks/ErrorBlock';
 import ReactMarkdown from 'react-markdown';
-
-function renderWithLinks(text: string) {
-  if (!text) return null;
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts = text.split(urlRegex);
-  return parts.map((part, i) =>
-    urlRegex.test(part) ? (
-      <a
-        key={i}
-        href={part}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-blue-400 underline hover:text-blue-300 break-all"
-      >
-        {part}
-      </a>
-    ) : (
-      <span key={i}>{part}</span>
-    )
-  );
-}
+import remarkGfm from 'remark-gfm';
 
 export interface NovaMessage {
     id: string;
@@ -163,7 +143,52 @@ export function ChatMessage({
                 {(message.block_type === 'text' || message.block_type === 'navigation' || !message.block_type) &&
                     !message.requires_approval && message.success !== false && (
                         <div className="px-3 py-2 rounded bg-[#0a1a1a] border border-[rgba(0,255,204,0.15)] text-[#e2e8f0] font-mono text-sm mt-2 max-w-none">
-                            <div className="whitespace-pre-wrap">{renderWithLinks(message.content)}</div>
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={{
+                                a: ({ href, children }) => (
+                                  <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-400 underline hover:text-blue-300 break-all"
+                                  >
+                                    {children}
+                                  </a>
+                                ),
+                                code: ({ inline, children }: any) => (
+                                  inline
+                                    ? <code className="bg-gray-800 text-green-400 px-1 rounded text-sm">{children}</code>
+                                    : <pre className="bg-gray-900 text-green-400 p-3 rounded-lg overflow-x-auto text-sm my-2">
+                                        <code>{children}</code>
+                                      </pre>
+                                ),
+                                h1: ({ children }) => <h1 className="text-xl font-bold text-white mt-3 mb-1">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-lg font-semibold text-white mt-3 mb-1">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-base font-semibold text-gray-200 mt-2 mb-1">{children}</h3>,
+                                ul: ({ children }) => <ul className="list-disc list-inside space-y-1 my-2 text-gray-300">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal list-inside space-y-1 my-2 text-gray-300">{children}</ol>,
+                                li: ({ children }) => <li className="text-gray-300">{children}</li>,
+                                p: ({ children }) => <p className="text-gray-300 my-1 leading-relaxed">{children}</p>,
+                                strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+                                blockquote: ({ children }) => (
+                                  <blockquote className="border-l-4 border-blue-500 pl-3 my-2 text-gray-400 italic">
+                                    {children}
+                                  </blockquote>
+                                ),
+                                table: ({ children }) => (
+                                  <div className="overflow-x-auto my-2">
+                                    <table className="min-w-full text-sm text-gray-300 border border-gray-700 rounded">
+                                      {children}
+                                    </table>
+                                  </div>
+                                ),
+                                th: ({ children }) => <th className="px-3 py-2 bg-gray-800 text-white font-semibold border border-gray-700">{children}</th>,
+                                td: ({ children }) => <td className="px-3 py-2 border border-gray-700">{children}</td>,
+                              }}
+                            >
+                              {message.content}
+                            </ReactMarkdown>
                         </div>
                     )}
 

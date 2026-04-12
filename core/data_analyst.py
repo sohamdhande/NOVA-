@@ -38,12 +38,14 @@ class DataAnalyst:
                 import os
                 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
                 from llm import _chat
+                from core.personality import get_system_prefix
                 prompt = (
                     f"Analyze this CSV data and provide insights:\n"
                     f"{json.dumps(stats, indent=2)}\n\n"
                     f"Give 3-5 key insights and recommendations."
                 )
-                insights = _chat(system="You are an expert Data Analyst.", user=prompt)
+                system_prompt = get_system_prefix() + "\n\nYou are an expert Data Analyst."
+                insights = _chat(system=system_prompt, user=prompt)
             except Exception as e:
                 insights = f"LLM analysis failed: {e}"
             

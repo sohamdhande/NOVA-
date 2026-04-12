@@ -65,6 +65,14 @@ class ToolRouter:
             "data_analysis":  self._handle_data_analysis,
             "security":       self._handle_security,
             "gmail":          self._handle_gmail,
+            "weather":        self._handle_weather,
+            "reminder":       self._handle_reminder,
+            "personality":    self._handle_personality,
+            "briefing":       self._handle_briefing,
+            "stats":          self._handle_stats,
+            "blocked":        self._handle_blocked_scan,
+            "github":         self._handle_github,
+            "screen":         self._handle_screen,
         }
         
         handler = handlers.get(intent.tool, self._handle_conversation)
@@ -83,6 +91,34 @@ class ToolRouter:
                     intent=intent.intent,
                     output="Mission acknowledged. File read complete.",
                     data={"path": path, "content": content, "lines": content.count('\n')},
+                    block_type="files",
+                    risk="LOW",
+                    requires_approval=False
+                )
+            except Exception as e:
+                return self._error(intent, str(e))
+                
+        elif intent.intent == "file_list":
+            if not path:
+                path = os.path.expanduser("~/")
+            try:
+                import os
+                files = os.listdir(path)
+                
+                # filter out hidden
+                files = [f for f in files if not f.startswith('.')]
+                
+                out = f"Contents of {path}:\n" + "\n".join(f"• {f}" for f in files[:20])
+                if len(files) > 20:
+                    out += f"\n...and {len(files)-20} more items"
+                if not files:
+                    out += "\n(Empty folder)"
+                    
+                return ToolResult(
+                    success=True,
+                    intent=intent.intent,
+                    output=out,
+                    data={"path": path, "files": files},
                     block_type="files",
                     risk="LOW",
                     requires_approval=False
@@ -887,7 +923,28 @@ concise and operational. Never break character."""
         p = intent.params
         
         try:
-            if i == "spotify_play":
+            from tools import system_control as sys_ctrl
+            if i == "get_running_apps":
+                out = sys_ctrl.get_running_apps()
+            elif i == "open_app":
+                out = sys_ctrl.open_app(p.get("app_name"))
+            elif i == "close_app":
+                out = sys_ctrl.close_app(p.get("app_name"))
+            elif i == "lock_mac":
+                out = sys_ctrl.lock_mac()
+            elif i == "get_volume":
+                out = sys_ctrl.get_volume()
+            elif i == "empty_trash":
+                out = sys_ctrl.empty_trash()
+            elif i == "sleep_mac":
+                out = sys_ctrl.sleep_mac()
+            elif i == "take_screenshot":
+                out = sys_ctrl.take_screenshot()
+            elif i == "set_volume":
+                out = sys_ctrl.set_volume(p.get("level", 50))
+            elif i == "set_brightness":
+                out = sys_ctrl.set_brightness(p.get("level", 50))
+            elif i == "spotify_play":
                 out = capabilities.spotify_command("play")
             elif i == "spotify_pause":
                 out = capabilities.spotify_command("pause")
@@ -898,14 +955,6 @@ concise and operational. Never break character."""
             elif i == "spotify_search":
                 out = capabilities.spotify_search_play(
                     p.get("query", "")
-                )
-            elif i == "set_volume":
-                out = capabilities.set_volume(
-                    p.get("level", 50)
-                )
-            elif i == "set_brightness":
-                out = capabilities.set_brightness(
-                    p.get("level", 50)
                 )
             elif i == "toggle_dark_mode":
                 out = capabilities.toggle_dark_mode(
@@ -1205,35 +1254,110 @@ concise and operational. Never break character."""
 
     async def _handle_documents(self,
             intent: ParsedIntent) -> ToolResult:
-        from core.document_engine import doc_engine
-        
         i = intent.intent
         p = intent.params
-        instruction = p.get("instruction", 
+        instruction = p.get("instruction",
                             intent.raw_message)
-        
+
         try:
-            doc_type_map = {
-                "create_docx": "docx",
-                "create_xlsx": "xlsx",
-                "create_pptx": "pptx"
-            }
-            doc_type = doc_type_map.get(i, "docx")
-            
-            out = await \
-                doc_engine.generate_document_with_llm(
-                    instruction, doc_type
+            # Extract topic from instruction
+            topic = instruction
+            for prefix in [
+                "make a pdf on ", "create a pdf about ",
+                "write a pdf on ", "make pdf on ",
+                "create pdf about ", "generate pdf about ",
+                "pdf about ", "pdf on ", "pdf of ",
+                "make a presentation on ",
+                "create a presentation about ",
+                "create ppt about ", "make ppt on ",
+                "make slides on ", "slides about ",
+                "make a word doc on ",
+                "create a document about ",
+                "write a report on ",
+                "create document about ",
+                "make document on ", "write document on ",
+                "make a word document on ",
+                "create a word document about ",
+            ]:
+                if instruction.lower().startswith(prefix):
+                    topic = instruction[len(prefix):].strip()
+                    break
+
+            # Generate content via LLM
+            content = ""
+            try:
+                import sys, os
+                sys.path.append(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))
+                ))
+                from llm import _chat
+                content = _chat(
+                    system=(
+                        "You are a professional content writer. "
+                        "Write comprehensive, well-structured content "
+                        "about the given topic. Use ## headings for "
+                        "sections, - for bullet points. "
+                        "Write at least 800 words covering key aspects."
+                    ),
+                    user=f"Write detailed content about: {topic}",
+                    temperature=0.4,
                 )
-            
+            except Exception as e:
+                print(f"[Documents] LLM content generation "
+                      f"failed: {e}")
+                content = (
+                    f"## Overview\n{topic} is a broad and "
+                    f"important subject.\n\n"
+                    f"## Key Points\n- Point 1\n- Point 2\n"
+                    f"- Point 3\n\n## Conclusion\n"
+                    f"This document covers {topic}."
+                )
+
+            # Route to correct tool
+            if i == "create_pdf":
+                from tools.pdf_tool import create_pdf
+                filepath = create_pdf(topic, content)
+                doc_type = "PDF"
+
+            elif i == "create_pptx":
+                from tools.pptx_tool import create_presentation
+                filepath = create_presentation(
+                    topic, content
+                )
+                doc_type = "Presentation"
+
+            elif i == "create_docx":
+                from tools.docx_tool import create_document
+                filepath = create_document(topic, content)
+                doc_type = "Document"
+
+            else:
+                # Default to PDF
+                from tools.pdf_tool import create_pdf
+                filepath = create_pdf(topic, content)
+                doc_type = "PDF"
+
+            import os
+            filename = os.path.basename(filepath)
+            folder = os.path.dirname(filepath)
+
             return ToolResult(
                 success=True,
                 intent=i,
-                output=out,
-                data={"type": doc_type,
-                      "instruction": instruction},
-                block_type="mission",
+                output=(
+                    f"✅ **{doc_type} Created Successfully**\n\n"
+                    f"📄 **File:** {filename}\n"
+                    f"📂 **Location:** `{folder}/`\n"
+                    f"📝 **Topic:** {topic}"
+                ),
+                data={
+                    "type": doc_type.lower(),
+                    "filepath": filepath,
+                    "topic": topic,
+                },
+                block_type="text",
                 risk="LOW",
-                requires_approval=False
+                requires_approval=False,
             )
         except Exception as e:
             return self._error(intent, str(e))
@@ -1749,6 +1873,302 @@ concise and operational. Never break character."""
         
         except Exception as e:
             return self._error(intent, str(e))
+
+    async def _handle_weather(self, intent: ParsedIntent) -> ToolResult:
+        """Handle weather queries via tools/weather_tool."""
+        try:
+            from tools.weather_tool import weather_summary, get_weather
+
+            location = intent.params.get("location", "Pune, India")
+
+            if intent.intent == "weather_summary":
+                summary = await weather_summary(location)
+                return ToolResult(
+                    success=True,
+                    intent=intent.intent,
+                    output=summary,
+                    data={"location": location},
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+            else:
+                data = await get_weather(location)
+                return ToolResult(
+                    success=True,
+                    intent=intent.intent,
+                    output=(
+                        f"🌤 {data['location']}: {data['temp']}°C "
+                        f"({data['condition']}), "
+                        f"humidity {data['humidity']}%, "
+                        f"wind {data['wind']} km/h"
+                    ),
+                    data=data,
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+        except Exception as e:
+            return self._error(intent, str(e))
+
+    async def _handle_reminder(self, intent: ParsedIntent) -> ToolResult:
+        """Handle reminder set / list via tools/reminder_tool."""
+        try:
+            from tools.reminder_tool import (
+                set_reminder, get_all_pending,
+            )
+
+            i = intent.intent
+            p = intent.params
+
+            if i == "set_reminder":
+                msg = p.get("message", "")
+                natural_time = p.get("natural_time", "in 1 hour")
+                result = set_reminder(msg, natural_time)
+
+                if result["status"] == "error":
+                    return ToolResult(
+                        success=False,
+                        intent=i,
+                        output=f"Could not parse time: {natural_time}",
+                        data=result,
+                        block_type="text",
+                        risk="LOW",
+                        requires_approval=False,
+                    )
+
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=(
+                        f"✓ Reminder set: **{msg}**\n"
+                        f"⏰ Scheduled for: {result['at']}"
+                    ),
+                    data=result,
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+
+            elif i == "list_reminders":
+                reminders = get_all_pending()
+                if not reminders:
+                    out = "No pending reminders."
+                else:
+                    lines = [
+                        f"🔔 **{r['message']}** — {r['remind_at']}"
+                        for r in reminders
+                    ]
+                    out = (
+                        f"**Pending Reminders ({len(reminders)}):**\n"
+                        + "\n".join(lines)
+                    )
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=out,
+                    data={"reminders": reminders},
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+
+            else:
+                return self._error(intent, f"Unknown reminder intent: {i}")
+
+        except Exception as e:
+            return self._error(intent, str(e))
+
+    async def _handle_personality(self, intent: ParsedIntent) -> ToolResult:
+        """Handle personality switching queries via core/personality."""
+        try:
+            from core.personality import get_personality, set_personality
+            
+            i = intent.intent
+            p = intent.params
+            
+            if i == "set_personality":
+                mode = p.get("mode", "jarvis")
+                result = set_personality(mode)
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=result,
+                    data={"mode": mode},
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+            elif i == "get_personality":
+                persona = get_personality()
+                return ToolResult(
+                    success=True,
+                    intent=i,
+                    output=f"I am currently operating in {persona['name']} mode.",
+                    data=persona,
+                    block_type="text",
+                    risk="LOW",
+                    requires_approval=False,
+                )
+            else:
+                return self._error(intent, f"Unknown personality intent: {i}")
+
+        except Exception as e:
+            return self._error(intent, str(e))
+
+    async def _handle_briefing(self, intent: ParsedIntent) -> ToolResult:
+        try:
+            from llm import generate_summary
+            from tools.calendar_tool import CalendarTool
+            from tools.weather_tool import get_weather
+            
+            cal = CalendarTool()
+            cal_res = cal.get_today_events()
+            
+            context = {
+                "events": cal_res.get("data", []) if cal_res.get("status") == "success" else [],
+                "tasks": [],
+                "weather": await get_weather("Pune")
+            }
+            briefing_text = generate_summary(context)
+            
+            return ToolResult(
+                success=True,
+                intent=intent.intent,
+                output=briefing_text,
+                data=context,
+                block_type="text",
+                risk="LOW",
+                requires_approval=False,
+            )
+        except Exception as e:
+            return self._error(intent, f"Briefing failed: {e}")
+
+    async def _handle_stats(self, intent: ParsedIntent) -> ToolResult:
+        try:
+            from core.resource_monitor import get_nova_stats, format_stats_summary
+            stats = get_nova_stats()
+            summary = format_stats_summary(stats)
+            return ToolResult(
+                success=True,
+                intent=intent.intent,
+                output=summary,
+                data=stats,
+                block_type="text",
+                risk="LOW",
+                requires_approval=False,
+            )
+        except Exception as e:
+            return self._error(intent, f"Stats failed: {e}")
+
+    async def _handle_github(self, intent: ParsedIntent) -> ToolResult:
+        from tools import github_tool
+        
+        i = intent.intent
+        p = intent.params
+        out = ""
+        
+        try:
+            if i == "get_my_prs":
+                out = github_tool.get_my_prs()
+            elif i == "get_openmrs_prs":
+                out = github_tool.get_openmrs_prs()
+            elif i == "get_my_repos":
+                out = github_tool.get_my_repos()
+            elif i == "get_pr_status":
+                out = github_tool.get_pr_status(p.get("repo", ""), p.get("pr_number", 0))
+            elif i == "get_repo_issues":
+                out = github_tool.get_repo_issues(p.get("repo", ""))
+            elif i == "get_repo_stats":
+                out = github_tool.get_repo_stats(p.get("repo", ""))
+            elif i == "get_commit_activity":
+                out = github_tool.get_commit_activity(p.get("repo", ""))
+            elif i == "get_pr_reviews":
+                out = github_tool.get_pr_reviews(p.get("repo", ""), p.get("pr_number", 0))
+            else:
+                return self._error(intent, f"Unknown GitHub intent: {i}")
+
+            if isinstance(out, dict) and out.get("type") == "pr_list":
+                formatted = []
+                for pr in out["prs"]:
+                    formatted.append(f"📦 {pr['repo']} — #{pr['number']}\n {pr['title']}\n 🔗 {pr['url']}\n ──────────────────")
+                out = "\n".join(formatted) if formatted else "No open PRs found."
+
+            return ToolResult(
+                success=True,
+                intent=i,
+                output=out,
+                data={},
+                block_type="text",
+                risk="LOW",
+                requires_approval=False
+            )
+        except Exception as e:
+            return self._error(intent, f"GitHub tool failed: {str(e)}")
+
+    async def _handle_screen(self, intent: ParsedIntent) -> ToolResult:
+        from tools.screen_tool import get_screen_context, fix_screen_error, \
+            ask_about_screen, click_element, type_text, scroll, start_passive_mode, stop_passive_mode
+        
+        i = intent.intent
+        p = intent.params
+        raw_input = intent.raw_message
+        
+        try:
+            if i == "get_screen_context":
+                out = get_screen_context()
+            elif i == "fix_screen_error":
+                out = fix_screen_error()
+            elif i == "ask_about_screen":
+                question = p.get("question", raw_input)
+                out = ask_about_screen(question)
+            elif i == "click_element":
+                element = p.get("element", "")
+                out = click_element(element)
+            elif i == "type_text":
+                text = p.get("text", "")
+                out = type_text(text)
+            elif i == "scroll" and p.get("direction") == "down":
+                out = scroll("down")
+            elif i == "scroll" and p.get("direction") == "up":
+                out = scroll("up")
+            elif i == "start_passive_mode":
+                out = start_passive_mode()
+            elif i == "stop_passive_mode":
+                out = stop_passive_mode()
+            else:
+                out = get_screen_context()
+
+            return ToolResult(
+                success=True,
+                intent=i,
+                output=str(out),
+                data={},
+                block_type="text",
+                risk=intent.risk,
+                requires_approval=False
+            )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                intent=i,
+                output=f"Screen tool error: {str(e)}",
+                data={},
+                block_type="text",
+                risk=intent.risk,
+                requires_approval=False
+            )
+
+    async def _handle_blocked_scan(self, intent: ParsedIntent) -> ToolResult:
+        return ToolResult(
+            success=False,
+            intent=intent.intent,
+            output="File threat scanning is not a capability I have implemented. I will not simulate scan results. Use a real antivirus tool.",
+            data={},
+            block_type="error",
+            risk="LOW",
+            requires_approval=False,
+        )
 
     def _error(self, intent: ParsedIntent, error: str) -> ToolResult:
         return ToolResult(

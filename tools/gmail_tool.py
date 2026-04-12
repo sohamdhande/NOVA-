@@ -154,20 +154,12 @@ class GmailTool:
             import sys
             sys.path.append(BASE_DIR)
             from llm import _chat
+            from core.personality import get_system_prefix
+            
+            system_prompt = get_system_prefix() + "\n\nSummarize these emails as a clean inbox briefing. List sender, subject, and one line summary for each. Flag anything urgent. Be concise."
+            
             summary = _chat(
-                system=(
-                    "You are NOVA, a highly advanced executive assistant. Summarize these emails into a clean, structured inbox briefing.\n"
-                    "Format strictly using Markdown with the following structure:\n\n"
-                    "## 📥 Inbox Briefing\n\n"
-                    "### 🚨 Action Required\n"
-                    "(List highly urgent/important items here, or 'None' if empty)\n"
-                    "- **[Sender Name]** | *[Subject]*\n"
-                    "  ↳ [1-line crisp summary]\n\n"
-                    "### ℹ️ General Updates\n"
-                    "- **[Sender Name]** | *[Subject]*\n"
-                    "  ↳ [1-line crisp summary]\n\n"
-                    "Ensure perfectly clean spacing, no filler text, and a crisp executive tone."
-                ),
+                system=system_prompt,
                 user=f"Emails:\n{raw_inbox}"
             )
             return summary

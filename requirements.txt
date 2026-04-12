@@ -10,3 +10,5 @@ google-auth-oauthlib
 google-api-python-client
 bcrypt
 httpx
+fpdf2
+dateparser

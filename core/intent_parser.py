@@ -30,6 +30,72 @@ class IntentParser:
         msg = message.lower().strip()
 
         
+        # ─── GITHUB ───────────────────────────────────────
+        import re
+        if any(p in msg for p in ["openmrs open prs", "openmrs prs", "openmrs pull requests"]):
+            return ParsedIntent(intent="get_openmrs_prs", tool="github", params={}, risk="LOW", raw_message=message)
+        if any(p in msg for p in ["my open prs", "my prs", "open prs", "pull requests", "list prs", "show prs", "all open prs"]):
+            return ParsedIntent(intent="get_my_prs", tool="github", params={}, risk="LOW", raw_message=message)
+        if any(p == msg or msg.startswith(p + " ") for p in ["my repos", "my repositories"]):
+            return ParsedIntent(intent="get_my_repos", tool="github", params={}, risk="LOW", raw_message=message)
+            
+        pr_status_match = re_module.search(r"pr status\s+([^\s]+)\s+(\d+)", msg)
+        if pr_status_match:
+            return ParsedIntent(intent="get_pr_status", tool="github", params={"repo": pr_status_match.group(1), "pr_number": int(pr_status_match.group(2))}, risk="LOW", raw_message=message)
+            
+        pr_reviews_match = re_module.search(r"pr reviews\s+([^\s]+)\s+(\d+)", msg)
+        if pr_reviews_match:
+            return ParsedIntent(intent="get_pr_reviews", tool="github", params={"repo": pr_reviews_match.group(1), "pr_number": int(pr_reviews_match.group(2))}, risk="LOW", raw_message=message)
+
+        issues_in_match = re_module.search(r"issues in\s+([^\s]+)", msg)
+        if issues_in_match:
+            return ParsedIntent(intent="get_repo_issues", tool="github", params={"repo": issues_in_match.group(1)}, risk="LOW", raw_message=message)
+
+        repo_stats_match = re_module.search(r"repo stats\s+([^\s]+)", msg)
+        if repo_stats_match:
+            return ParsedIntent(intent="get_repo_stats", tool="github", params={"repo": repo_stats_match.group(1)}, risk="LOW", raw_message=message)
+
+        recent_commits_match = re_module.search(r"recent commits\s+([^\s]+)", msg)
+        if recent_commits_match:
+            return ParsedIntent(intent="get_commit_activity", tool="github", params={"repo": recent_commits_match.group(1)}, risk="LOW", raw_message=message)
+
+        # ─── SCREEN VISION ────────────────────────────────
+        if any(p == msg for p in ["what's on my screen", "what do you see", "analyze my screen", "read my screen"]):
+            return ParsedIntent(intent="get_screen_context", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["fix this error", "fix the error on screen"]):
+            return ParsedIntent(intent="fix_screen_error", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["scroll down"]):
+            return ParsedIntent(intent="scroll", tool="screen", params={"direction": "down"}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["scroll up"]):
+            return ParsedIntent(intent="scroll", tool="screen", params={"direction": "up"}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["start watching screen", "passive mode on"]):
+            return ParsedIntent(intent="start_passive_mode", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["stop watching screen", "passive mode off"]):
+            return ParsedIntent(intent="stop_passive_mode", tool="screen", params={}, risk="LOW", raw_message=message)
+
+        click_match = re_module.search(r"click\s+(.+)", msg)
+        if click_match:
+            return ParsedIntent(intent="click_element", tool="screen", params={"element": click_match.group(1)}, risk="MEDIUM", raw_message=message)
+
+        type_match = re_module.search(r"type\s+(.+)", msg)
+        if type_match:
+            return ParsedIntent(intent="type_text", tool="screen", params={"text": type_match.group(1)}, risk="MEDIUM", raw_message=message)
+
+        ask_screen_match = re_module.search(r"ask about screen\s+(.+)", msg)
+        if ask_screen_match:
+            return ParsedIntent(intent="ask_about_screen", tool="screen", params={"question": ask_screen_match.group(1)}, risk="LOW", raw_message=message)
+
+        # ─── BLOCKED ──────────────────────────────────────
+        BLOCKED_INTENTS = ["check files", "find threat", "scan files", "virus scan"]
+        if any(b in msg for b in BLOCKED_INTENTS):
+            return ParsedIntent(
+                intent="blocked_scan",
+                tool="blocked",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
         # ─── SLASH COMMANDS (SKILLS) ──────────────────────
         if msg.startswith("/"):
             parts = message.split(" ", 1)
@@ -345,10 +411,54 @@ class IntentParser:
 
         # Document generation — highest priority check
         msg_lower = message.lower()
+
+        # PDF creation
+        if any(p in msg_lower for p in [
+            "make a pdf", "create a pdf", "generate a pdf",
+            "make pdf", "create pdf", "generate pdf",
+            "pdf of ", "pdf for ", "pdf about ",
+            "pdf on ", "write a pdf",
+            "as a pdf", "in pdf", "pdf file",
+            ".pdf", "pdf notes", "notes pdf",
+            "pdf document"
+        ]):
+            return ParsedIntent(
+                intent="create_pdf",
+                tool="documents",
+                params={"instruction": message},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # Presentation / PowerPoint creation
+        if any(p in msg_lower for p in [
+            "presentation", "powerpoint", ".pptx",
+            "slide deck", "as slides", "as a presentation",
+            "make slides", "create slides",
+            "make a presentation", "create a presentation",
+            "create ppt", "make ppt", "generate ppt",
+            "slides on ", "slides about ",
+            "ppt about ", "ppt on "
+        ]):
+            return ParsedIntent(
+                intent="create_pptx",
+                tool="documents",
+                params={"instruction": message},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # Word doc / DOCX creation
         if any(p in msg_lower for p in [
             "word doc", "word document", ".docx",
             "as a doc", "as a document", "as a word",
-            "in word", "docx file"
+            "in word", "docx file",
+            "make a word doc", "create a document",
+            "write a report", "create report",
+            "make a report", "generate report",
+            "make document", "write document",
+            "create a report", "write report",
+            "in word format"
         ]):
             return ParsedIntent(
                 intent="create_docx",
@@ -358,6 +468,7 @@ class IntentParser:
                 raw_message=message
             )
 
+        # Spreadsheet
         if any(p in msg_lower for p in [
             "spreadsheet", ".xlsx", "excel file",
             "as a spreadsheet", "in excel"
@@ -370,65 +481,7 @@ class IntentParser:
                 raw_message=message
             )
 
-        if any(p in msg_lower for p in [
-            "presentation", "powerpoint", ".pptx",
-            "slide deck", "as slides", "as a presentation"
-        ]):
-            return ParsedIntent(
-                intent="create_pptx",
-                tool="documents",
-                params={"instruction": message},
-                risk="LOW",
-                raw_message=message
-            )
-
-        # Word doc
-        if any(p in msg_lower for p in [
-            "word doc", "word document", ".docx",
-            "create report", "write a report", 
-            "make a report", "generate report",
-            "create document", "write document",
-            "create a report", "write report",
-            "as a doc", "as a document",
-            "as a word", "in word format"
-        ]):
-            return ParsedIntent(
-                intent="create_docx",
-                tool="documents",
-                params={"instruction": message},
-                risk="LOW",
-                raw_message=message
-            )
-
-        # Spreadsheet
-        if any(p in msg for p in [
-            "spreadsheet", "excel", ".xlsx",
-            "create sheet", "make sheet",
-            "as a spreadsheet", "in excel",
-            "excel file", "xlsx file"
-        ]):
-            return ParsedIntent(
-                intent="create_xlsx",
-                tool="documents",
-                params={"instruction": message},
-                risk="LOW",
-                raw_message=message
-            )
-
-        # Presentation
-        if any(p in msg for p in [
-            "presentation", "powerpoint", "slides",
-            ".pptx", "slide deck", "deck",
-            "create slides", "make slides",
-            "as a presentation", "in powerpoint"
-        ]):
-            return ParsedIntent(
-                intent="create_pptx",
-                tool="documents",
-                params={"instruction": message},
-                risk="LOW",
-                raw_message=message
-            )
+        # Word doc        
         
         # APP OPENING - highest priority
         APP_MAP = {
@@ -650,7 +703,9 @@ class IntentParser:
             "how is my system", "check cpu",
             "check ram", "check memory",
             "check disk", "check battery",
-            "show metrics"
+            "show metrics", "cpu usage",
+            "ram usage", "memory usage",
+            "system stats", "computer usage"
         ]):
             return ParsedIntent(
                 intent="system_status",
@@ -660,12 +715,21 @@ class IntentParser:
                 raw_message=message
             )
         
+        # ORGANIZE DOWNLOADS
+        if any(p in msg for p in ["organize downloads", "organise downloads", "clean downloads", "sort downloads"]):
+            return ParsedIntent(
+                intent="organize_folder",
+                tool="file_manager",
+                params={"path": "~/Downloads"},
+                risk="LOW",
+                raw_message=message
+            )
+
         # CLEANUP
         if "yes execute cleanup" not in msg and            "clean my desktop" not in msg and            "clean docs" not in msg and            any(p in msg for p in [
             "run cleanup", "clean system",
             "clean my system", "cleanup",
-            "clear cache", "clean downloads",
-            "organize downloads"
+            "clear cache"
         ]):
             return ParsedIntent(
                 intent="system_cleanup",
@@ -752,7 +816,11 @@ class IntentParser:
         
         if any(msg == p or msg.startswith(p) for p in [
             "show tasks", "list tasks", "my tasks",
-            "what are my tasks", "show my tasks"
+            "what are my tasks", "show my tasks",
+            "list all my tasks", "show all my tasks",
+            "all my tasks", "all of my tasks",
+            "list my tasks", "list all tasks", 
+            "pending tasks", "list pending tasks"
         ]):
             return ParsedIntent(
                 intent="task_list",
@@ -778,6 +846,38 @@ class IntentParser:
                 intent="file_read",
                 tool="file_system",
                 params={"path": path},
+                risk="LOW",
+                raw_message=message
+            )
+        if any(p in msg for p in [
+            "list downloads", "show downloads", "my downloads"
+        ]):
+            return ParsedIntent(
+                intent="file_list",
+                tool="file_system",
+                params={"path": "~/Downloads"},
+                risk="LOW",
+                raw_message=message
+            )
+            
+        if any(p in msg for p in [
+            "list desktop", "show desktop", "my desktop"
+        ]):
+            return ParsedIntent(
+                intent="file_list",
+                tool="file_system",
+                params={"path": "~/Desktop"},
+                risk="LOW",
+                raw_message=message
+            )
+            
+        if any(p in msg for p in [
+            "list documents", "show documents", "my documents"
+        ]):
+            return ParsedIntent(
+                intent="file_list",
+                tool="file_system",
+                params={"path": "~/Documents"},
                 risk="LOW",
                 raw_message=message
             )
@@ -957,45 +1057,51 @@ class IntentParser:
                 raw_message=message
             )
 
-        # ─── VOLUME / BRIGHTNESS ─────────────────────────
-        vol_match = re_module.search(
-            r'(set |turn )?(volume|vol)\s*(to\s*)?(\d+)',
-            msg
-        )
-        if vol_match:
-            level = int(vol_match.group(4))
-            level = max(0, min(100, level))
-            return ParsedIntent(
-                intent="set_volume",
-                tool="system_control",
-                params={"level": level},
-                risk="LOW",
-                raw_message=message
-            )
+        # ─── NATIVE SYSTEM CONTROL ──────────────────────────────
+        sys_apps_running = any(p in msg for p in ["what apps are running", "running apps", "open apps"])
+        if sys_apps_running:
+            return ParsedIntent(intent="get_running_apps", tool="system_control", params={}, risk="LOW", raw_message=message)
 
-        bright_match = re_module.search(
-            r'(set |turn )?(brightness)\s*(to\s*)?(\d+)',
-            msg
-        )
+        open_app_match = re_module.search(r"open\s+(.+)", msg)
+        if open_app_match:
+            blocked_apps = ["apps", "prs", "pull requests", "pdf", "word", "document", "powerpoint", "presentation", "sheet"]
+            app_name = open_app_match.group(1).lower()
+            if not any(b in app_name for b in blocked_apps):
+                return ParsedIntent(intent="open_app", tool="system_control", params={"app_name": open_app_match.group(1).strip()}, risk="LOW", raw_message=message)
+
+        close_app_match = re_module.search(r"(close|quit)\s+(.+)", msg)
+        if close_app_match:
+            return ParsedIntent(intent="close_app", tool="system_control", params={"app_name": close_app_match.group(2).strip()}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["lock my mac", "lock screen"]):
+            return ParsedIntent(intent="lock_mac", tool="system_control", params={}, risk="LOW", raw_message=message)
+            
+        if any(p in msg for p in ["what's the volume", "current volume"]):
+            return ParsedIntent(intent="get_volume", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["empty trash"]):
+            return ParsedIntent(intent="empty_trash", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["sleep mac", "go to sleep", "sleep"]):
+            return ParsedIntent(intent="sleep_mac", tool="system_control", params={}, risk="LOW", raw_message=message)
+            
+        if any(p in msg for p in ["take screenshot", "screenshot"]):
+            return ParsedIntent(intent="take_screenshot", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        vol_match = re_module.search(r'(set |turn )?(volume|vol)\s*(to\s*)?(\d+)', msg)
+        if vol_match:
+            return ParsedIntent(intent="set_volume", tool="system_control", params={"level": int(vol_match.group(4))}, risk="LOW", raw_message=message)
+
+        bright_match = re_module.search(r'(set |turn )?(brightness)\s*(to\s*)?(\d+)', msg)
         if bright_match:
-            level = int(bright_match.group(4))
-            return ParsedIntent(
-                intent="set_brightness",
-                tool="system_control",
-                params={"level": level},
-                risk="LOW",
-                raw_message=message
-            )
+            return ParsedIntent(intent="set_brightness", tool="system_control", params={"level": int(bright_match.group(4))}, risk="LOW", raw_message=message)
 
         # Mute/unmute
-        if any(p in msg for p in [
-            "mute", "unmute", "silence"
-        ]):
+        if any(p in msg for p in ["mute", "unmute", "silence"]):
             return ParsedIntent(
                 intent="set_volume",
                 tool="system_control",
-                params={"level": 0 if "mute" in msg 
-                        and "unmute" not in msg else 50},
+                params={"level": 0 if "mute" in msg and "unmute" not in msg else 50},
                 risk="LOW",
                 raw_message=message
             )
@@ -1140,6 +1246,140 @@ class IntentParser:
                 risk="LOW",
                 raw_message=message
             )
+
+        # ─── WEATHER ─────────────────────────────────────
+        if any(p in msg for p in [
+            "weather", "what's the weather",
+            "how's the weather", "hows the weather",
+            "will it rain", "temperature today",
+            "weather forecast", "what is the weather",
+            "how is the weather"
+        ]):
+            # Extract location: "weather in Tokyo" → Tokyo
+            location = "Pune, India"
+            for trigger in ["weather in ", "weather for ",
+                            "temperature in ", "rain in "]:
+                if trigger in msg:
+                    idx = msg.index(trigger) + len(trigger)
+                    location = message[idx:].strip()
+                    break
+            return ParsedIntent(
+                intent="weather_summary",
+                tool="weather",
+                params={"location": location},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── BRIEFING ────────────────────────────────────
+        if any(p in msg for p in [
+            "morning briefing", "give me my briefing", "what's my day look like"
+        ]):
+            return ParsedIntent(
+                intent="run_morning_briefing",
+                tool="briefing",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── STATS ───────────────────────────────────────
+        if any(p in msg for p in [
+            "nova stats", "resource usage", "how much ram", 
+            "system status", "how much cpu"
+        ]):
+            return ParsedIntent(
+                intent="get_nova_stats",
+                tool="stats",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── PERSONALITY ─────────────────────────────────
+        personality_match = None
+        if any(p in msg for p in ["switch to jarvis", "jarvis mode"]):
+            personality_match = "jarvis"
+        elif any(p in msg for p in ["switch to chill", "chill mode"]):
+            personality_match = "chill"
+        elif any(p in msg for p in ["switch to mentor", "mentor mode"]):
+            personality_match = "mentor"
+        elif any(p in msg for p in ["switch to ghost", "ghost mode"]):
+            personality_match = "ghost"
+            
+        if personality_match:
+            return ParsedIntent(
+                intent="set_personality",
+                tool="personality",
+                params={"mode": personality_match},
+                risk="LOW",
+                raw_message=message
+            )
+            
+        if any(p in msg for p in [
+            "what mode are you in", "current personality"
+        ]):
+            return ParsedIntent(
+                intent="get_personality",
+                tool="personality",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── REMINDERS ───────────────────────────────────
+        if any(p in msg for p in [
+            "set a reminder", "set reminder",
+            "reminder at ", "remind me at ",
+            "remind me in ", "remind me to "
+        ]):
+            # Extract message and time
+            reminder_msg = message
+            natural_time = ""
+            for trigger in [
+                "remind me to ", "remind me at ",
+                "remind me in ", "set a reminder to ",
+                "set reminder to ", "set a reminder for ",
+                "set reminder for ", "reminder at "
+            ]:
+                if trigger in msg:
+                    remainder = message[msg.index(trigger) + len(trigger):].strip()
+                    # Try to split on time indicators
+                    for time_kw in [" at ", " in ", " by ",
+                                    " tomorrow", " today"]:
+                        if time_kw in remainder.lower():
+                            idx = remainder.lower().index(time_kw)
+                            reminder_msg = remainder[:idx].strip()
+                            natural_time = remainder[idx:].strip()
+                            break
+                    if not natural_time:
+                        reminder_msg = remainder
+                        natural_time = "in 1 hour"
+                    break
+            return ParsedIntent(
+                intent="set_reminder",
+                tool="reminder",
+                params={
+                    "message": reminder_msg,
+                    "natural_time": natural_time
+                },
+                risk="LOW",
+                raw_message=message
+            )
+
+        if any(p in msg for p in [
+            "my reminders", "what are my reminders",
+            "show reminders", "list reminders",
+            "pending reminders"
+        ]):
+            return ParsedIntent(
+                intent="list_reminders",
+                tool="reminder",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -1168,6 +1408,72 @@ class IntentParser:
     def _deterministic_parse(self, message: str) -> Optional[ParsedIntent]:
         msg = message.lower().strip()
         
+        # ─── GITHUB ───────────────────────────────────────
+        import re
+        if any(p in msg for p in ["openmrs open prs", "openmrs prs", "openmrs pull requests"]):
+            return ParsedIntent(intent="get_openmrs_prs", tool="github", params={}, risk="LOW", raw_message=message)
+        if any(p in msg for p in ["my open prs", "my prs", "open prs", "pull requests", "list prs", "show prs", "all open prs"]):
+            return ParsedIntent(intent="get_my_prs", tool="github", params={}, risk="LOW", raw_message=message)
+        if any(p == msg or msg.startswith(p + " ") for p in ["my repos", "my repositories"]):
+            return ParsedIntent(intent="get_my_repos", tool="github", params={}, risk="LOW", raw_message=message)
+            
+        pr_status_match = re_module.search(r"pr status\s+([^\s]+)\s+(\d+)", msg)
+        if pr_status_match:
+            return ParsedIntent(intent="get_pr_status", tool="github", params={"repo": pr_status_match.group(1), "pr_number": int(pr_status_match.group(2))}, risk="LOW", raw_message=message)
+            
+        pr_reviews_match = re_module.search(r"pr reviews\s+([^\s]+)\s+(\d+)", msg)
+        if pr_reviews_match:
+            return ParsedIntent(intent="get_pr_reviews", tool="github", params={"repo": pr_reviews_match.group(1), "pr_number": int(pr_reviews_match.group(2))}, risk="LOW", raw_message=message)
+
+        issues_in_match = re_module.search(r"issues in\s+([^\s]+)", msg)
+        if issues_in_match:
+            return ParsedIntent(intent="get_repo_issues", tool="github", params={"repo": issues_in_match.group(1)}, risk="LOW", raw_message=message)
+
+        repo_stats_match = re_module.search(r"repo stats\s+([^\s]+)", msg)
+        if repo_stats_match:
+            return ParsedIntent(intent="get_repo_stats", tool="github", params={"repo": repo_stats_match.group(1)}, risk="LOW", raw_message=message)
+
+        recent_commits_match = re_module.search(r"recent commits\s+([^\s]+)", msg)
+        if recent_commits_match:
+            return ParsedIntent(intent="get_commit_activity", tool="github", params={"repo": recent_commits_match.group(1)}, risk="LOW", raw_message=message)
+
+        # ─── SCREEN VISION ────────────────────────────────
+        if any(p == msg for p in ["what's on my screen", "what do you see", "analyze my screen", "read my screen"]):
+            return ParsedIntent(intent="get_screen_context", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["fix this error", "fix the error on screen"]):
+            return ParsedIntent(intent="fix_screen_error", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["scroll down"]):
+            return ParsedIntent(intent="scroll", tool="screen", params={"direction": "down"}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["scroll up"]):
+            return ParsedIntent(intent="scroll", tool="screen", params={"direction": "up"}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["start watching screen", "passive mode on"]):
+            return ParsedIntent(intent="start_passive_mode", tool="screen", params={}, risk="LOW", raw_message=message)
+        if any(p == msg for p in ["stop watching screen", "passive mode off"]):
+            return ParsedIntent(intent="stop_passive_mode", tool="screen", params={}, risk="LOW", raw_message=message)
+
+        click_match = re_module.search(r"click\s+(.+)", msg)
+        if click_match:
+            return ParsedIntent(intent="click_element", tool="screen", params={"element": click_match.group(1)}, risk="MEDIUM", raw_message=message)
+
+        type_match = re_module.search(r"type\s+(.+)", msg)
+        if type_match:
+            return ParsedIntent(intent="type_text", tool="screen", params={"text": type_match.group(1)}, risk="MEDIUM", raw_message=message)
+
+        ask_screen_match = re_module.search(r"ask about screen\s+(.+)", msg)
+        if ask_screen_match:
+            return ParsedIntent(intent="ask_about_screen", tool="screen", params={"question": ask_screen_match.group(1)}, risk="LOW", raw_message=message)
+
+        # ─── BLOCKED ──────────────────────────────────────
+        BLOCKED_INTENTS = ["check files", "find threat", "scan files", "virus scan"]
+        if any(b in msg for b in BLOCKED_INTENTS):
+            return ParsedIntent(
+                intent="blocked_scan",
+                tool="blocked",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
         # ─── SLASH COMMANDS (SKILLS) ──────────────────────
         if msg.startswith("/"):
             parts = message.split(" ", 1)
@@ -1483,6 +1789,24 @@ class IntentParser:
 
         # Document generation — highest priority check
         msg_lower = message.lower()
+
+        # PDF creation
+        if any(p in msg_lower for p in [
+            "make a pdf", "create a pdf", "generate a pdf",
+            "make pdf", "create pdf", "generate pdf",
+            "pdf of ", "pdf for ", "pdf about ",
+            "as a pdf", "in pdf", "pdf file",
+            ".pdf", "pdf notes", "notes pdf",
+            "pdf document"
+        ]):
+            return ParsedIntent(
+                intent="create_pdf",
+                tool="documents",
+                params={"instruction": message},
+                risk="LOW",
+                raw_message=message
+            )
+
         if any(p in msg_lower for p in [
             "word doc", "word document", ".docx",
             "as a doc", "as a document", "as a word",
@@ -1862,14 +2186,13 @@ class IntentParser:
         # TASKS
         if any(p in msg for p in [
             "create task", "add task", "new task",
-            "remind me to", "create a task",
+            "create a task",
             "schedule meeting", "book meeting"
         ]):
             title = message
             for trigger in ["create task:", "create task",
                             "add task:", "add task",
-                            "new task:", "new task",
-                            "remind me to"]:
+                            "new task:", "new task"]:
                 if trigger in msg:
                     title = message[
                         msg.index(trigger)+len(trigger):
@@ -2091,45 +2414,51 @@ class IntentParser:
                 raw_message=message
             )
 
-        # ─── VOLUME / BRIGHTNESS ─────────────────────────
-        vol_match = re_module.search(
-            r'(set |turn )?(volume|vol)\s*(to\s*)?(\d+)',
-            msg
-        )
-        if vol_match:
-            level = int(vol_match.group(4))
-            level = max(0, min(100, level))
-            return ParsedIntent(
-                intent="set_volume",
-                tool="system_control",
-                params={"level": level},
-                risk="LOW",
-                raw_message=message
-            )
+        # ─── NATIVE SYSTEM CONTROL ──────────────────────────────
+        sys_apps_running = any(p in msg for p in ["what apps are running", "running apps", "open apps"])
+        if sys_apps_running:
+            return ParsedIntent(intent="get_running_apps", tool="system_control", params={}, risk="LOW", raw_message=message)
 
-        bright_match = re_module.search(
-            r'(set |turn )?(brightness)\s*(to\s*)?(\d+)',
-            msg
-        )
+        open_app_match = re_module.search(r"open\s+(.+)", msg)
+        if open_app_match:
+            blocked_apps = ["apps", "prs", "pull requests", "pdf", "word", "document", "powerpoint", "presentation", "sheet"]
+            app_name = open_app_match.group(1).lower()
+            if not any(b in app_name for b in blocked_apps):
+                return ParsedIntent(intent="open_app", tool="system_control", params={"app_name": open_app_match.group(1).strip()}, risk="LOW", raw_message=message)
+
+        close_app_match = re_module.search(r"(close|quit)\s+(.+)", msg)
+        if close_app_match:
+            return ParsedIntent(intent="close_app", tool="system_control", params={"app_name": close_app_match.group(2).strip()}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["lock my mac", "lock screen"]):
+            return ParsedIntent(intent="lock_mac", tool="system_control", params={}, risk="LOW", raw_message=message)
+            
+        if any(p in msg for p in ["what's the volume", "current volume"]):
+            return ParsedIntent(intent="get_volume", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["empty trash"]):
+            return ParsedIntent(intent="empty_trash", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        if any(p in msg for p in ["sleep mac", "go to sleep", "sleep"]):
+            return ParsedIntent(intent="sleep_mac", tool="system_control", params={}, risk="LOW", raw_message=message)
+            
+        if any(p in msg for p in ["take screenshot", "screenshot"]):
+            return ParsedIntent(intent="take_screenshot", tool="system_control", params={}, risk="LOW", raw_message=message)
+
+        vol_match = re_module.search(r'(set |turn )?(volume|vol)\s*(to\s*)?(\d+)', msg)
+        if vol_match:
+            return ParsedIntent(intent="set_volume", tool="system_control", params={"level": int(vol_match.group(4))}, risk="LOW", raw_message=message)
+
+        bright_match = re_module.search(r'(set |turn )?(brightness)\s*(to\s*)?(\d+)', msg)
         if bright_match:
-            level = int(bright_match.group(4))
-            return ParsedIntent(
-                intent="set_brightness",
-                tool="system_control",
-                params={"level": level},
-                risk="LOW",
-                raw_message=message
-            )
+            return ParsedIntent(intent="set_brightness", tool="system_control", params={"level": int(bright_match.group(4))}, risk="LOW", raw_message=message)
 
         # Mute/unmute
-        if any(p in msg for p in [
-            "mute", "unmute", "silence"
-        ]):
+        if any(p in msg for p in ["mute", "unmute", "silence"]):
             return ParsedIntent(
                 intent="set_volume",
                 tool="system_control",
-                params={"level": 0 if "mute" in msg 
-                        and "unmute" not in msg else 50},
+                params={"level": 0 if "mute" in msg and "unmute" not in msg else 50},
                 risk="LOW",
                 raw_message=message
             )
@@ -2286,6 +2615,139 @@ class IntentParser:
                 tool="file_ops",
                 params={},
                 risk="MEDIUM",
+                raw_message=message
+            )
+
+        # ─── WEATHER ─────────────────────────────────────
+        if any(p in msg for p in [
+            "weather", "what's the weather",
+            "how's the weather", "hows the weather",
+            "will it rain", "temperature today",
+            "weather forecast", "what is the weather",
+            "how is the weather"
+        ]):
+            # Extract location: "weather in Tokyo" → Tokyo
+            location = "Pune, India"
+            for trigger in ["weather in ", "weather for ",
+                            "temperature in ", "rain in "]:
+                if trigger in msg:
+                    idx = msg.index(trigger) + len(trigger)
+                    location = message[idx:].strip()
+                    break
+            return ParsedIntent(
+                intent="weather_summary",
+                tool="weather",
+                params={"location": location},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── BRIEFING ────────────────────────────────────
+        if any(p in msg for p in [
+            "morning briefing", "give me my briefing", "what's my day look like"
+        ]):
+            return ParsedIntent(
+                intent="run_morning_briefing",
+                tool="briefing",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── STATS ───────────────────────────────────────
+        if any(p in msg for p in [
+            "nova stats", "resource usage", "how much ram", 
+            "system status", "how much cpu"
+        ]):
+            return ParsedIntent(
+                intent="get_nova_stats",
+                tool="stats",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── PERSONALITY ─────────────────────────────────
+        personality_match = None
+        if any(p in msg for p in ["switch to jarvis", "jarvis mode"]):
+            personality_match = "jarvis"
+        elif any(p in msg for p in ["switch to chill", "chill mode"]):
+            personality_match = "chill"
+        elif any(p in msg for p in ["switch to mentor", "mentor mode"]):
+            personality_match = "mentor"
+        elif any(p in msg for p in ["switch to ghost", "ghost mode"]):
+            personality_match = "ghost"
+            
+        if personality_match:
+            return ParsedIntent(
+                intent="set_personality",
+                tool="personality",
+                params={"mode": personality_match},
+                risk="LOW",
+                raw_message=message
+            )
+            
+        if any(p in msg for p in [
+            "what mode are you in", "current personality"
+        ]):
+            return ParsedIntent(
+                intent="get_personality",
+                tool="personality",
+                params={},
+                risk="LOW",
+                raw_message=message
+            )
+
+        # ─── REMINDERS ───────────────────────────────────
+        if any(p in msg for p in [
+            "set a reminder", "set reminder",
+            "reminder at ", "remind me at ",
+            "remind me in ", "remind me to "
+        ]):
+            # Extract message and time
+            reminder_msg = message
+            natural_time = ""
+            for trigger in [
+                "remind me to ", "remind me at ",
+                "remind me in ", "set a reminder to ",
+                "set reminder to ", "set a reminder for ",
+                "set reminder for ", "reminder at "
+            ]:
+                if trigger in msg:
+                    remainder = message[msg.index(trigger) + len(trigger):].strip()
+                    # Try to split on time indicators
+                    for time_kw in [" at ", " in ", " by ",
+                                    " tomorrow", " today"]:
+                        if time_kw in remainder.lower():
+                            idx = remainder.lower().index(time_kw)
+                            reminder_msg = remainder[:idx].strip()
+                            natural_time = remainder[idx:].strip()
+                            break
+                    if not natural_time:
+                        reminder_msg = remainder
+                        natural_time = "in 1 hour"
+                    break
+            return ParsedIntent(
+                intent="set_reminder",
+                tool="reminder",
+                params={
+                    "message": reminder_msg,
+                    "natural_time": natural_time
+                },
+                risk="LOW",
+                raw_message=message
+            )
+
+        if any(p in msg for p in [
+            "my reminders", "what are my reminders",
+            "show reminders", "list reminders",
+            "pending reminders"
+        ]):
+            return ParsedIntent(
+                intent="list_reminders",
+                tool="reminder",
+                params={},
+                risk="LOW",
                 raw_message=message
             )
 

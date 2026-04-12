@@ -3,16 +3,21 @@ import { useApi } from "../../hooks/useApi";
 import { useNovaStore } from "../../store/novaStore";
 import { useEventBus } from "../../hooks/useEventBus";
 
-function Skeleton() { return <div className="nova-card animate-pulse h-20" />; }
+function Skeleton() { return <div className="nova-card animate-pulse h-32" />; }
 function ErrorCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
-    return <div className="nova-card border-[var(--nova-red)] text-xs font-mono text-[var(--nova-red)]">{msg}<button onClick={onRetry} className="ml-3 underline cursor-pointer">RETRY</button></div>;
+    return <div className="nova-card border-[var(--nova-red)] text-xs font-mono text-[var(--nova-red)] p-4 text-center">{msg}<button onClick={onRetry} className="block w-full mt-3 p-2 bg-[var(--nova-red)]/10 hover:bg-[var(--nova-red)]/20 transition-colors uppercase tracking-widest cursor-pointer rounded">Retry Diagnostics</button></div>;
 }
 
 interface Metrics {
-    cpu: number; ram: number; disk: number; battery: number;
-    battery_charging: boolean;
-    processes: { name: string; cpu: number; pid: number }[];
-    network_up_kb?: number; network_down_kb?: number;
+    cpu: number; cpu_count: number; cpu_freq_mhz: number; load_avg: number[];
+    ram: number; ram_used_gb: number; ram_total_gb: number;
+    swap_percent: number; swap_used_gb: number;
+    disk: number; disk_used_gb: number; disk_total_gb: number;
+    battery: number; battery_charging: boolean; battery_mins_left: number | null;
+    network_up_kb: number; network_down_kb: number; net_sent_gb: number; net_recv_gb: number;
+    uptime: string; platform: string; hostname: string;
+    processes: { name: string; cpu: number; pid: number; mem: number }[];
+    temps: Record<string, number>;
 }
 
 export function MonitorPanel() {
@@ -33,20 +38,19 @@ export function MonitorPanel() {
             setError("");
             setLastUpdated(new Date());
         } catch (e: any) {
-            setError(e.message ?? "Fetch failed");
+            setError(e.message ?? "Telemetry drop");
         } finally {
             setLoading(false);
         }
     }, [get]);
 
-    useEffect(() => { fetchMetrics(); const iv = setInterval(fetchMetrics, 5000); return () => clearInterval(iv); }, [fetchMetrics]);
+    useEffect(() => { fetchMetrics(); const iv = setInterval(fetchMetrics, 2000); return () => clearInterval(iv); }, [fetchMetrics]);
 
-    // Track live events
     useEffect(() => {
         if (lastEvent) {
             setEvents((prev) => [
-                { time: new Date().toLocaleTimeString(), source: lastEvent.source, type: lastEvent.type, priority: lastEvent.priority },
-                ...prev.slice(0, 19),
+                { time: new Date().toLocaleTimeString('en-US', { hour12: false }), source: lastEvent.source, type: lastEvent.type, priority: lastEvent.priority },
+                ...prev.slice(0, 24),
             ]);
         }
     }, [lastEvent]);
@@ -55,81 +59,123 @@ export function MonitorPanel() {
         setRunningBtn(label);
         try {
             await post(endpoint);
-            addToast({ id: crypto.randomUUID(), message: `${label} executed`, type: "success" });
-        } catch { addToast({ id: crypto.randomUUID(), message: `${label} failed`, type: "error" }); }
-        finally { setTimeout(() => setRunningBtn(""), 1500); }
+            addToast({ id: crypto.randomUUID(), message: `Command Sent: ${label}`, type: "success" });
+        } catch { addToast({ id: crypto.randomUUID(), message: `Command Failed: ${label}`, type: "error" }); }
+        finally { setTimeout(() => setRunningBtn(""), 1000); }
     };
 
-    function GaugeCard({ label, value, isCharging }: { label: string; value: number; isCharging?: boolean }) {
-        const color = value > 85 ? "bg-[var(--nova-red)]" : value > 60 ? "bg-[var(--nova-amber)]" : "bg-[var(--nova-green)]";
-        const textColor = value > 85 ? "text-[var(--nova-red)]" : value > 60 ? "text-[var(--nova-amber)]" : "text-[var(--nova-green)]";
+    function MetricGauge({ title, value, maxVal, unit, subtitle, alertThreshold = 85 }: { title: string, value: number, maxVal: number, unit: string, subtitle?: string, alertThreshold?: number }) {
+        const percent = Math.min((value / maxVal) * 100, 100);
+        const isAlert = percent >= alertThreshold;
+        const colorClass = isAlert ? "bg-[var(--nova-red)]" : percent >= 65 ? "bg-[var(--nova-amber)]" : "bg-[var(--nova-accent)]";
+        const textClass = isAlert ? "text-[var(--nova-red)]" : percent >= 65 ? "text-[var(--nova-amber)]" : "text-[var(--nova-text)]";
+        const glowClass = isAlert ? "drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]" : "drop-shadow-[0_0_8px_rgba(0,255,204,0.3)]";
+
         return (
-            <div className="nova-card flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                    <span className="text-[9px] font-mono tracking-[0.2em] text-[var(--nova-muted)] uppercase">{label}</span>
-                    {value > 85 && <span className="w-2 h-2 rounded-full bg-[var(--nova-red)] animate-pulse" />}
+            <div className="relative overflow-hidden bg-[var(--nova-surface)] border border-[var(--nova-border)] p-4 rounded-lg flex flex-col justify-between group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--nova-accent)] opacity-[0.02] rounded-full blur-2xl group-hover:opacity-[0.05] transition-opacity duration-700 -mr-10 -mt-10 pointer-events-none" />
+                <div className="flex justify-between items-start mb-2 z-10">
+                    <span className="text-[10px] font-mono tracking-widest text-[var(--nova-muted)] uppercase">{title}</span>
+                    {isAlert && <span className="w-2 h-2 rounded-full bg-[var(--nova-red)] animate-pulse" />}
                 </div>
-                <div className="flex items-baseline gap-1">
-                    <span className={`text-2xl font-mono font-bold ${textColor}`}>{value}</span>
-                    <span className="text-xs font-mono text-[var(--nova-muted)]">%</span>
-                    {isCharging && <span className="text-[var(--nova-green)] text-sm ml-1">⚡</span>}
+                <div className="flex items-baseline gap-1.5 z-10">
+                    <span className={`text-3xl font-mono font-bold tracking-tight ${textClass} ${glowClass}`}>{value.toFixed(1)}</span>
+                    <span className="text-xs font-mono text-[var(--nova-muted)]">{unit}</span>
                 </div>
-                <div className="w-full h-1.5 bg-[var(--nova-surface2)] rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-500 ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
+                {subtitle && <span className="text-[10px] font-mono text-[var(--nova-muted)] mt-1 mb-3 z-10">{subtitle}</span>}
+                {!subtitle && <div className="mb-3" />}
+                
+                <div className="w-full h-1 bg-[var(--nova-surface2)] rounded-full overflow-hidden mt-auto z-10">
+                    <div className={`h-full transition-all duration-1000 ease-out ${colorClass}`} style={{ width: `${percent}%` }} />
                 </div>
             </div>
         );
     }
 
-    if (loading) return <div className="p-6 grid grid-cols-4 gap-4">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} />)}</div>;
-    if (error) return <div className="p-6"><ErrorCard msg={error} onRetry={fetchMetrics} /></div>;
+    if (loading) return <div className="p-6 h-full grid grid-cols-4 gap-4 auto-rows-max">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} />)}</div>;
+    if (error && !metrics) return <div className="p-6 h-full flex flex-col justify-center items-center"><div className="w-96"><ErrorCard msg={error} onRetry={fetchMetrics} /></div></div>;
 
     const m = metrics!;
-    const procs = [...(m.processes || [])].sort((a, b) => b.cpu - a.cpu);
 
     return (
-        <div className="p-6 h-full overflow-y-auto">
+        <div className="p-6 h-full flex flex-col hide-scrollbar overflow-y-auto relative">
+            <style>{`.hide-scrollbar::-webkit-scrollbar { display: none; }`}</style>
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-                <h1 className="text-sm font-mono tracking-[0.3em] uppercase text-[var(--nova-accent)]">SYSTEM MONITOR</h1>
-                <div className="flex items-center gap-3">
-                    <span className={`text-[9px] font-mono ${connected ? "text-[var(--nova-green)]" : "text-[var(--nova-red)]"}`}>
-                        WS {connected ? "CONNECTED" : "DISCONNECTED"}
-                    </span>
-                    <span className="text-[9px] font-mono text-[var(--nova-muted)]">UPDATED {lastUpdated.toLocaleTimeString()}</span>
-                    <button onClick={fetchMetrics} className="text-[var(--nova-muted)] hover:text-[var(--nova-accent)] text-xs cursor-pointer">⟳</button>
+            <div className="flex shrink-0 items-center justify-between mb-8 pb-4 border-b border-[var(--nova-border)]/50">
+                <div className="flex items-center gap-4">
+                    <h1 className="text-lg font-mono tracking-[0.3em] text-[var(--nova-accent)] drop-shadow-[0_0_8px_rgba(0,255,204,0.4)]">TELEMETRY</h1>
+                    <div className="flex items-center gap-2 bg-[var(--nova-surface2)] px-3 py-1 rounded-full border border-[var(--nova-border)]">
+                        <span className={`w-2 h-2 rounded-full ${connected ? "bg-[var(--nova-green)] animate-pulse shadow-[0_0_5px_var(--nova-green)]" : "bg-[var(--nova-red)] font-bold"}`} />
+                        <span className="text-[9px] font-mono tracking-widest text-[var(--nova-muted)]">UPLINK: {connected ? "SECURE" : "LOST"}</span>
+                    </div>
+                </div>
+                <div className="flex items-center gap-4 text-[10px] font-mono text-[var(--nova-muted)] tracking-wider">
+                    <div className="text-right">
+                        <div>UPTIME: <span className="text-[var(--nova-text)]">{m.uptime}</span></div>
+                        <div>NODE: <span className="text-[var(--nova-text)]">{m.hostname}</span></div>
+                    </div>
+                    <button onClick={fetchMetrics} className="p-2 bg-[var(--nova-surface2)] hover:bg-[var(--nova-accent)]/10 hover:text-[var(--nova-accent)] border border-[var(--nova-border)] rounded transition-all cursor-pointer">
+                        ⟳ FORCE SYNC
+                    </button>
                 </div>
             </div>
 
-            {/* Gauge Cards */}
-            <div className="grid grid-cols-4 gap-4 mb-6">
-                <GaugeCard label="CPU" value={m.cpu} />
-                <GaugeCard label="RAM" value={m.ram} />
-                <GaugeCard label="DISK" value={m.disk} />
-                <GaugeCard label="BATTERY" value={m.battery} isCharging={m.battery_charging} />
+            {/* Core Metrics Grid */}
+            <div className="grid grid-cols-4 gap-4 mb-6 shrink-0">
+                <MetricGauge title="Logical CPU" value={m.cpu} maxVal={100} unit="%" subtitle={`${m.cpu_count} Cores @ ${m.cpu_freq_mhz}MHz`} />
+                <MetricGauge title="Physical RAM" value={m.ram_used_gb} maxVal={m.ram_total_gb} unit="GB" subtitle={`${m.ram.toFixed(1)}% Usage`} />
+                <MetricGauge title="Solid State Disk" value={m.disk_used_gb} maxVal={m.disk_total_gb} unit="GB" subtitle={`${m.disk.toFixed(1)}% Allocated`} />
+                <div className="relative bg-[var(--nova-surface)] border border-[var(--nova-border)] p-4 rounded-lg flex flex-col justify-between">
+                    <div className="flex justify-between items-start mb-2">
+                        <span className="text-[10px] font-mono tracking-widest text-[var(--nova-muted)] uppercase">POWER CELL</span>
+                        {m.battery_charging && <span className="text-[var(--nova-green)] text-xs animate-pulse">⚡</span>}
+                    </div>
+                    <div className="flex items-baseline gap-1.5">
+                        <span className={`text-3xl font-mono font-bold tracking-tight ${m.battery <= 20 && !m.battery_charging ? 'text-[var(--nova-red)] drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'text-[var(--nova-text)]'}`}>{m.battery}</span>
+                        <span className="text-xs font-mono text-[var(--nova-muted)]">%</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-[var(--nova-muted)] mt-1 mb-3">
+                        {m.battery_charging ? 'Grid Connected' : (m.battery_mins_left ? `${m.battery_mins_left} mins remaining` : 'Discharging')}
+                    </span>
+                    <div className="w-full h-1 bg-[var(--nova-surface2)] rounded-full overflow-hidden mt-auto">
+                        <div className={`h-full transition-all duration-1000 ${m.battery <= 20 && !m.battery_charging ? 'bg-[var(--nova-red)]' : 'bg-[var(--nova-green)]'}`} style={{ width: `${m.battery}%` }} />
+                    </div>
+                </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
-                {/* Left: Process Table + Network */}
-                <div className="flex flex-col gap-4">
-                    {/* Processes */}
-                    <div>
-                        <h3 className="text-[9px] font-mono tracking-[0.3em] text-[var(--nova-muted)] mb-3 uppercase">RUNNING PROCESSES</h3>
-                        <div className="nova-card !p-0 overflow-hidden">
-                            <table className="w-full text-[10px] font-mono">
-                                <thead>
-                                    <tr className="border-b border-[var(--nova-border)] text-[var(--nova-muted)]">
-                                        <th className="text-left py-2 px-3">NAME</th>
-                                        <th className="text-right py-2 px-3">CPU%</th>
-                                        <th className="text-right py-2 px-3">PID</th>
+            <div className="grid grid-cols-12 gap-6 flex-1 min-h-0 pb-6">
+                
+                {/* Left col - Analysis */}
+                <div className="col-span-8 flex flex-col gap-6 h-[500px]">
+                    
+                    {/* Process Table Container */}
+                    <div className="flex-1 bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded-lg flex flex-col overflow-hidden relative">
+                        <div className="absolute top-0 right-0 p-3 opacity-10 pointer-events-none">
+                            <pre className="font-mono text-xs">SYS_PROCS_V2</pre>
+                        </div>
+                        <div className="p-3 border-b border-[var(--nova-border)]/50 flex justify-between items-center bg-[var(--nova-surface2)]/50">
+                            <h3 className="text-[10px] font-mono tracking-[0.3em] text-[var(--nova-accent)] uppercase">Compute Ledger</h3>
+                            <span className="text-[9px] font-mono text-[var(--nova-muted)]">TOP {m.processes.length} ALLOCATED</span>
+                        </div>
+                        <div className="flex-1 overflow-auto hide-scrollbar">
+                            <table className="w-full text-xs font-mono tracking-wide relative">
+                                <thead className="sticky top-0 bg-[var(--nova-surface)]/95 backdrop-blur z-10 shadow-[0_4px_10px_rgba(0,0,0,0.2)]">
+                                    <tr className="text-[9px] tracking-wider text-[var(--nova-muted)]">
+                                        <th className="text-left font-normal py-3 px-4 w-[50%]">IDENTIFIER</th>
+                                        <th className="text-right font-normal py-3 px-4">PID</th>
+                                        <th className="text-right font-normal py-3 px-4">MEM %</th>
+                                        <th className="text-right font-normal py-3 px-4 text-[var(--nova-accent)]">CPU %</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {procs.map((p, i) => (
-                                        <tr key={i} className={`border-b border-[var(--nova-border)]/50 hover:bg-[var(--nova-accent)]/5 transition-colors ${p.cpu > 10 ? "text-[var(--nova-amber)]" : "text-[var(--nova-text)]"}`}>
-                                            <td className="py-1.5 px-3">{p.name}</td>
-                                            <td className="py-1.5 px-3 text-right">{p.cpu}</td>
-                                            <td className="py-1.5 px-3 text-right text-[var(--nova-muted)]">{p.pid}</td>
+                                    {m.processes.map((p, i) => (
+                                        <tr key={p.pid} className={`border-b border-[var(--nova-border)]/30 transition-colors ${p.cpu > 20 ? 'bg-[var(--nova-amber)]/5 hover:bg-[var(--nova-amber)]/10' : 'hover:bg-[var(--nova-surface2)]'}`}>
+                                            <td className={`py-2.5 px-4 font-bold truncate max-w-[200px] ${p.cpu > 20 ? 'text-[var(--nova-amber)]' : 'text-[var(--nova-text)]'}`}>
+                                                {p.name}
+                                            </td>
+                                            <td className="py-2.5 px-4 text-right text-[var(--nova-muted)]">{p.pid}</td>
+                                            <td className="py-2.5 px-4 text-right text-[var(--nova-muted)]">{p.mem.toFixed(1)}</td>
+                                            <td className="py-2.5 px-4 text-right text-[var(--nova-text)] glow-text">{p.cpu.toFixed(1)}</td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -137,55 +183,114 @@ export function MonitorPanel() {
                         </div>
                     </div>
 
-                    {/* Network */}
-                    <div className="flex gap-4">
-                        <div className="nova-card flex-1 flex items-center gap-2">
-                            <span className="text-[var(--nova-accent)]">↑</span>
-                            <span className="text-xs font-mono text-[var(--nova-accent)]">{m.network_up_kb ?? 0} KB/s</span>
+                    {/* Lower Left - Sub Metrics & Actions */}
+                    <div className="h-40 shrink-0 grid grid-cols-2 gap-4">
+                        {/* Network Subsystem */}
+                        <div className="bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded-lg p-4 flex flex-col justify-between">
+                            <h3 className="text-[10px] font-mono tracking-[0.3em] text-[var(--nova-muted)] uppercase mb-2">Network Layer</h3>
+                            <div className="grid grid-cols-2 gap-4 flex-1 items-center">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[var(--nova-accent)] text-lg leading-none">↑</span>
+                                        <span className="text-xl font-mono font-bold text-[var(--nova-text)]">{m.network_up_kb.toFixed(0)}</span>
+                                    </div>
+                                    <div className="text-[9px] font-mono text-[var(--nova-muted)]">KB/s UPLINK</div>
+                                </div>
+                                <div className="border-l border-[var(--nova-border)]/50 pl-4">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-[var(--nova-green)] text-lg leading-none">↓</span>
+                                        <span className="text-xl font-mono font-bold text-[var(--nova-text)]">{m.network_down_kb.toFixed(0)}</span>
+                                    </div>
+                                    <div className="text-[9px] font-mono text-[var(--nova-muted)]">KB/s DOWNLINK</div>
+                                </div>
+                            </div>
                         </div>
-                        <div className="nova-card flex-1 flex items-center gap-2">
-                            <span className="text-[var(--nova-green)]">↓</span>
-                            <span className="text-xs font-mono text-[var(--nova-green)]">{m.network_down_kb ?? 0} KB/s</span>
-                        </div>
-                    </div>
 
-                    {/* Actions */}
-                    <div className="grid grid-cols-2 gap-2">
-                        {[
-                            { label: "RUN CLEANUP", endpoint: "/api/nova/cleanup" },
-                            { label: "PAUSE NOVA", endpoint: "/api/nova/pause" },
-                            { label: "TRIGGER REASONING", endpoint: "/api/nova/reasoning-cycle" },
-                            { label: "BIOMETRIC UNLOCK", endpoint: "/api/nova/biometric-unlock" },
-                        ].map((a) => (
-                            <button key={a.label} onClick={() => handleAction(a.label, a.endpoint)}
-                                className="text-[10px] font-mono tracking-wider px-3 py-2 rounded border border-[var(--nova-accent)]/30 text-[var(--nova-accent)] hover:bg-[var(--nova-accent)]/10 transition-colors cursor-pointer disabled:opacity-50"
-                                disabled={runningBtn === a.label}>
-                                {runningBtn === a.label ? "..." : a.label}
-                            </button>
-                        ))}
+                        {/* System Controls */}
+                        <div className="grid grid-cols-2 gap-2">
+                            {[
+                                { label: "PURGE CACHE", endpoint: "/api/nova/cleanup" },
+                                { label: "FORCE STANDBY", endpoint: "/api/nova/pause" },
+                                { label: "LOGICAL REASONING", endpoint: "/api/nova/reasoning-cycle" },
+                                { label: "SECURE OVERRIDE", endpoint: "/api/nova/biometric-unlock" },
+                            ].map((a) => (
+                                <button key={a.label} onClick={() => handleAction(a.label, a.endpoint)}
+                                    className="bg-[var(--nova-surface)] hover:bg-[var(--nova-accent)]/10 border border-[var(--nova-accent)]/30 hover:border-[var(--nova-accent)] flex flex-col items-center justify-center rounded transition-all cursor-pointer group disabled:opacity-50 relative overflow-hidden"
+                                    disabled={runningBtn === a.label}>
+                                    <div className="absolute inset-0 bg-[var(--nova-accent)] opacity-0 group-hover:opacity-5 transition-opacity" />
+                                    <span className="text-[9px] font-mono tracking-widest text-[var(--nova-accent)] text-center px-2">
+                                        {runningBtn === a.label ? "EXECUTING..." : a.label}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
 
-                {/* Right: Live Event Feed */}
-                <div>
-                    <h3 className="text-[9px] font-mono tracking-[0.3em] text-[var(--nova-muted)] mb-3 uppercase">LIVE EVENT FEED</h3>
-                    <div className="nova-card !p-0 max-h-[400px] overflow-y-auto">
-                        {events.length === 0 ? (
-                            <div className="text-[10px] font-mono text-[var(--nova-muted)] text-center py-8">Waiting for events...</div>
-                        ) : (
-                            events.map((ev, i) => {
-                                const pColor = ev.priority >= 7 ? "text-[var(--nova-red)]" : ev.priority >= 4 ? "text-[var(--nova-amber)]" : "text-[var(--nova-muted)]";
-                                return (
-                                    <div key={i} className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--nova-border)]/30 text-[10px] font-mono">
-                                        <span className="text-[var(--nova-muted)] shrink-0 w-16">{ev.time}</span>
-                                        <span className="text-[var(--nova-text)] flex-1 truncate">{ev.source} → {ev.type}</span>
-                                        <span className={`shrink-0 ${pColor}`}>P{ev.priority}</span>
-                                    </div>
-                                );
-                            })
+                {/* Right col - Logs & Aux */}
+                <div className="col-span-4 h-[500px] flex flex-col gap-4">
+                    {/* Aux Stats */}
+                    <div className="bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded-lg p-4 shrink-0 grid grid-cols-2 gap-x-4 gap-y-3">
+                        <div>
+                            <span className="block text-[9px] font-mono text-[var(--nova-muted)] tracking-wider">SWAP PAGING</span>
+                            <span className="font-mono text-xs text-[var(--nova-text)]">{m.swap_used_gb} GB ({m.swap_percent}%)</span>
+                        </div>
+                        <div>
+                            <span className="block text-[9px] font-mono text-[var(--nova-muted)] tracking-wider">LOAD AVG</span>
+                            <span className="font-mono text-xs text-[var(--nova-text)]">{m.load_avg.join(', ')}</span>
+                        </div>
+                        {Object.keys(m.temps).length > 0 && (
+                            <div className="col-span-2 border-t border-[var(--nova-border)]/30 mt-1 pt-2">
+                                <span className="block text-[9px] font-mono text-[var(--nova-muted)] tracking-wider mb-1">THERMAL SENSORS</span>
+                                <div className="flex flex-wrap gap-2">
+                                    {Object.entries(m.temps).map(([k, v]) => (
+                                        <span key={k} className="text-[10px] font-mono bg-[var(--nova-surface2)] px-2 py-0.5 rounded text-[var(--nova-text)]">{k.replace('core', 'C')}: {v}°C</span>
+                                    ))}
+                                </div>
+                            </div>
                         )}
                     </div>
+
+                    {/* Event Feed */}
+                    <div className="flex-1 bg-[var(--nova-surface)] border border-[var(--nova-border)] rounded-lg flex flex-col overflow-hidden relative">
+                        <div className="p-3 border-b border-[var(--nova-border)]/50 bg-[var(--nova-surface2)]/50 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 bg-[var(--nova-accent)] rounded-full animate-pulse" />
+                                <h3 className="text-[10px] font-mono tracking-[0.3em] text-[var(--nova-accent)] uppercase">Event Stream</h3>
+                            </div>
+                            <span className="text-[9px] font-mono text-[var(--nova-muted)]">{events.length} CAPTURED</span>
+                        </div>
+                        <div className="flex-1 overflow-y-auto hide-scrollbar p-2">
+                            {events.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center opacity-30 text-[var(--nova-accent)] font-mono text-xs">
+                                    <span>[ LISTENING ]</span>
+                                    <span className="mt-2 text-[10px]">&gt; NO INBOUND ANOMALIES</span>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-1.5">
+                                    {events.map((ev, i) => {
+                                        const isHigh = ev.priority >= 7;
+                                        const isMed = ev.priority >= 4;
+                                        const color = isHigh ? "text-[var(--nova-red)]" : isMed ? "text-[var(--nova-amber)]" : "text-[var(--nova-text)]";
+                                        const bg = isHigh ? "bg-[var(--nova-red)]/10" : isMed ? "bg-[var(--nova-amber)]/5" : "bg-[var(--nova-surface2)]";
+                                        const border = isHigh ? "border-l-2 border-[var(--nova-red)]" : "border-l border-[var(--nova-border)]";
+                                        
+                                        return (
+                                            <div key={i} className={`p-2 rounded-r ${bg} ${border} animate-fadeIn`}>
+                                                <div className="flex justify-between items-start mb-1">
+                                                    <span className={`text-[10px] font-mono font-bold tracking-wide ${color}`}>{ev.type.replace('_', ' ').toUpperCase()}</span>
+                                                    <span className="text-[9px] font-mono text-[var(--nova-muted)]">{ev.time}</span>
+                                                </div>
+                                                <div className="text-[10px] font-mono text-[var(--nova-muted)] truncate max-w-full">SRC: {ev.source}</div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 </div>
+
             </div>
         </div>
     );
