@@ -239,12 +239,22 @@ def preprocess_content(text: str) -> list:
             flowables.append(Spacer(1, 6))
             continue
 
+        if line == '---' or line == '***':
+            flowables.append(Spacer(1, 8 * mm))
+            continue
+
         # Extract prefix and content
         style_key = 'body'
         prefix = ''
         content = line
 
-        if line.startswith('## '):
+        if line.startswith('#### '):
+            style_key = 'heading'
+            content = line[5:]
+        elif line.startswith('### '):
+            style_key = 'heading'
+            content = line[4:]
+        elif line.startswith('## '):
             style_key = 'heading'
             content = line[3:]
         elif line.startswith('# '):
