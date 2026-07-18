@@ -1093,10 +1093,32 @@ def get_master_report_status():
 def get_master_report_pdf():
     from fastapi.responses import Response
     from nova.packages.runtime.master_report import update_and_render_master_report, render_master_report_pdf
+    import os
     store = _get_store()
     try:
         res = update_and_render_master_report(store)
-        pdf_bytes = render_master_report_pdf(res)
+        
+        # Cache based on the deterministic report hash
+        docs_dir = os.path.join(_nova_root, "documents")
+        os.makedirs(docs_dir, exist_ok=True)
+        cached_pdf_path = os.path.join(docs_dir, f"cached_master_report_{res.report_hash}.pdf")
+        
+        if os.path.exists(cached_pdf_path):
+            with open(cached_pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+        else:
+            pdf_bytes = render_master_report_pdf(res)
+            # Clean up old cached reports to save space
+            for file in os.listdir(docs_dir):
+                if file.startswith("cached_master_report_") and file.endswith(".pdf"):
+                    try:
+                        os.remove(os.path.join(docs_dir, file))
+                    except Exception:
+                        pass
+            # Save new cache
+            with open(cached_pdf_path, "wb") as f:
+                f.write(pdf_bytes)
+
         filename = f"master-report-{res.generated_at.strftime('%Y-%m-%d')}.pdf"
         return Response(
             content=pdf_bytes,
