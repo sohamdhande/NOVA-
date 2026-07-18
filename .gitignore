@@ -43,6 +43,13 @@ temp/
 npm_audit.json
 bandit_output.json
 fix_intent_parser.py
+test_*.py
+verify_*.py
+check_*.py
+migration.py
+*.parquet
+*.pkl
+*.bin
 
 # OS / MacOS
 .DS_Store
