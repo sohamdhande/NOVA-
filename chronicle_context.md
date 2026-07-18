@@ -76,6 +76,16 @@ The dashboard UI (`dashboard/src/components/panels/knowledge/`) surfaces this da
 - **Export Tools:** Allows users to easily trigger the extraction prompt to ingest new knowledge from external interactions.
 - **Reasoning Injection:** In `nova/packages/reasoning/__init__.py`, the AI's reasoning compiler listens for keywords (like "change", "growth", "chronicle") and can autonomously inject the `DAILY_CHRONICLE_REPORT` fact into its context, making the AI hyper-aware of recent organizational knowledge.
 
+### 3.4 The Reasoning Engine
+The read-only inference engine processes user queries against the verified Knowledge Graph. It relies on the `REASONING_SYSTEM_PROMPT` (in `nova/packages/llm/prompts.py`) which enforces two core constraints:
+- **Strict Verification**: It can ONLY use facts present in the Compiled Context, explicitly refusing queries lacking supporting evidence.
+- **Natural Synthesis**: It acts as a highly intelligent strategic advisor. It is strictly forbidden from spitting out raw UUIDs, "Fact [ID]" tags, or robotic citations, ensuring it synthesizes the knowledge into a flowing, cohesive narrative.
+
+### 3.5 The Master Report & PDF Generation
+The Master Report provides an executive summary of the entire knowledge graph.
+- **Deterministic Caching**: The API (`/api/knowledge/master-report`) computes a deterministic `report_hash` from the underlying database state. Generated PDFs are cached to disk as `cached_master_report_<hash>.pdf`. If the DB hasn't changed, the endpoint bypasses generation entirely and serves the cache instantly.
+- **Cyberpunk Styling Pipeline**: The PDF generator (`tools/pdf_tool.py`) parses raw Markdown and translates it into ReportLab Flowables. It utilizes a custom dark-mode Cyberpunk aesthetic (pitch-black backgrounds, neon cyan accents, Courier fonts) to maintain the NOVA system's cohesive technical identity.
+
 ---
 
 ## 4. Technical Specifications & Developer Reference
