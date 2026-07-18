@@ -40,6 +40,8 @@ chromadb/
 *.log
 tmp/
 temp/
+documents/*.pdf
+domains/queue/
 npm_audit.json
 bandit_output.json
 fix_intent_parser.py
