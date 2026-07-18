@@ -24,6 +24,12 @@ export function useApi() {
                 throw new Error("Session expired");
             }
 
+            if (!res.ok) {
+                const errData = await res.json().catch(() => null);
+                const errMsg = errData?.detail || errData?.message || res.statusText || "API Error";
+                throw new Error(errMsg);
+            }
+
             return res;
         },
         [token, logout]

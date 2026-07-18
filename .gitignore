@@ -12,6 +12,8 @@ pip-delete-this-directory.txt
 .venv
 env.bak
 venv.bak
+nova/venv/
+nova/.pytest_cache/
 
 # Node / Dashboard
 dashboard/node_modules/
@@ -30,6 +32,8 @@ client_secret.json
 data/
 *.sqlite3
 *.db
+*.db-shm
+*.db-wal
 chromadb/
 
 # Temporary Files / Scripts / Logs

@@ -16,7 +16,7 @@ BASE = "https://api.github.com"
 def get_my_prs():
     try:
         url = f"{BASE}/search/issues?q=author:{GITHUB_USERNAME}+type:pr+state:open"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         items = data.get("items", [])
@@ -46,13 +46,13 @@ def get_my_prs():
 def get_pr_status(repo: str, pr_number: int) -> str:
     try:
         url = f"{BASE}/repos/{repo}/pulls/{pr_number}"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         
         # Get review count via reviews endpoint
         reviews_url = f"{BASE}/repos/{repo}/pulls/{pr_number}/reviews"
-        reviews_resp = requests.get(reviews_url, headers=HEADERS)
+        reviews_resp = requests.get(reviews_url, headers=HEADERS, timeout=10)
         review_count = len(reviews_resp.json()) if reviews_resp.status_code == 200 else "Unknown"
         
         return f"PR #{data['number']}: {data['title']} | State: {data['state']} | Mergeable: {data.get('mergeable')} | Reviews: {review_count}"
@@ -62,7 +62,7 @@ def get_pr_status(repo: str, pr_number: int) -> str:
 def get_my_repos() -> str:
     try:
         url = f"{BASE}/user/repos?sort=updated&per_page=10"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         if not data:
@@ -78,7 +78,7 @@ def get_my_repos() -> str:
 def get_repo_issues(repo: str) -> str:
     try:
         url = f"{BASE}/repos/{repo}/issues?state=open"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         # GitHub API returns PRs as issues, so filter them out
@@ -113,7 +113,7 @@ def get_openmrs_prs():
 def get_pr_reviews(repo: str, pr_number: int) -> str:
     try:
         url = f"{BASE}/repos/{repo}/pulls/{pr_number}/reviews"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         if not data:
@@ -131,7 +131,7 @@ def get_pr_reviews(repo: str, pr_number: int) -> str:
 def get_repo_stats(repo: str) -> str:
     try:
         url = f"{BASE}/repos/{repo}"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         
@@ -142,7 +142,7 @@ def get_repo_stats(repo: str) -> str:
 def get_commit_activity(repo: str) -> str:
     try:
         url = f"{BASE}/repos/{repo}/commits?per_page=5"
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         data = response.json()
         if not data:

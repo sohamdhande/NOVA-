@@ -70,10 +70,13 @@ export interface ChatResponse {
 
 export const getToken = (): string | null => localStorage.getItem("nova_token");
 const setToken = (token: string) => localStorage.setItem("nova_token", token);
-export const clearToken = () => localStorage.removeItem("nova_token");
+export const clearToken = () => {
+    localStorage.removeItem("nova_token");
+    window.location.reload();
+};
 
 // Helper for authenticated requests
-async function authenticatedFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
+export async function authenticatedFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
     const token = getToken();
     const headers = new Headers(options.headers || {});
 

@@ -44,7 +44,7 @@ export function ChatMessage({
     // N.O.V.A messages: render appropriate block
     return (
         <div className="flex justify-start mb-3">
-            <div className="max-w-lg w-full">
+            <div className="max-w-lg w-full min-w-0">
                 {/* NOVA label */}
                 <span className="text-[#00ffcc] text-xs font-mono mb-1 block">N.O.V.A</span>
 
@@ -82,6 +82,15 @@ export function ChatMessage({
                                         li: ({children}) => <li className="flex gap-2"><span className="text-[#00ffcc]">▸</span><span>{children}</span></li>,
                                         code: ({children}) => <code className="bg-[#001a1a] text-[#00ffcc] px-1 rounded text-xs">{children}</code>,
                                         hr: () => <hr className="border-[rgba(0,255,204,0.2)] my-2" />,
+                                        table: ({ children }) => (
+                                          <div className="overflow-x-auto w-full custom-scrollbar my-2">
+                                            <table className="w-full text-sm border-collapse">
+                                              {children}
+                                            </table>
+                                          </div>
+                                        ),
+                                        th: ({ children }) => <th className="px-3 py-2 bg-[rgba(0,255,204,0.1)] text-[#00ffcc] font-bold border border-[rgba(0,255,204,0.2)]">{children}</th>,
+                                        td: ({ children }) => <td className="px-3 py-2 border border-[rgba(0,255,204,0.2)]">{children}</td>,
                                     }}
                                 >
                                     {message.content}

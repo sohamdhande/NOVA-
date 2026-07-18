@@ -2,6 +2,8 @@ import { useNovaStore } from "../../store/novaStore";
 
 const NAV_ITEMS = [
     { icon: "⌂", label: "HQ", key: "hq" },
+    { icon: "💎", label: "DISTILL", key: "distill" },
+    { icon: "🧬", label: "CHRONICLE", key: "knowledge" },
     { icon: "⬛", label: "TERMINAL", key: "terminal" },
     { icon: "✓", label: "TASKS", key: "tasks" },
     { icon: "⚡", label: "AUTOMATIONS", key: "automations" },

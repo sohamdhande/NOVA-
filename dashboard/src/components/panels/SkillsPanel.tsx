@@ -26,6 +26,10 @@ export function SkillsPanel() {
     const [generating, setGenerating] = useState(false);
     const [generatedCode, setGeneratedCode] = useState("");
 
+    // GitHub Importer form
+    const [githubUrl, setGithubUrl] = useState("https://github.com/alirezarezvani/claude-skills");
+    const [importing, setImporting] = useState(false);
+
     const fetchSkills = useCallback(async () => {
         try {
             const res = await get<any>('/api/skills').catch(() => ({ installed: [], available: [] }));
@@ -68,19 +72,55 @@ export function SkillsPanel() {
         setGenerating(true);
         setGeneratedCode("");
         try {
-            const prompt = `Generate a python NOVA skill plugin:
+            const prompt = `Generate a JSON NOVA skill plugin for the skill_engine. 
 Name: ${bName}
 Desc: ${bDesc}
 Trigger: ${bTrigger}
 Actions: ${bActions}
 
-Return ONLY python code, no markdown wrappers.`;
+The output must be a valid JSON object matching the Skill schema with keys: name, description, triggers (array of strings), slash_command, and steps (array of objects with action, params (dict), and description).
+Valid action types are: shell, llm, system, file, web, document.
+Return ONLY valid JSON. No markdown wrappers.`;
             const res = await post<any>('/api/chat', { message: prompt });
             setGeneratedCode(res.response || JSON.stringify(res));
         } catch (e: any) {
             addToast({ id: crypto.randomUUID(), type: 'error', message: 'Failed to generate skill code' });
         } finally {
             setGenerating(false);
+        }
+    };
+
+    const handleInstallCustom = async () => {
+        try {
+            const payload = JSON.parse(generatedCode);
+            await post('/api/skills/install_custom', payload);
+            addToast({ id: crypto.randomUUID(), type: 'success', message: 'Custom skill installed successfully' });
+            setGeneratedCode("");
+            setBName("");
+            setBDesc("");
+            setBTrigger("");
+            setBActions("");
+            fetchSkills();
+        } catch (e: any) {
+            addToast({ id: crypto.randomUUID(), type: 'error', message: e.message || 'Failed to install custom skill. Is it valid JSON?' });
+        }
+    };
+
+    const handleImportGithub = async () => {
+        if (!githubUrl) {
+            addToast({ id: crypto.randomUUID(), type: 'error', message: 'GitHub URL is required' });
+            return;
+        }
+        setImporting(true);
+        try {
+            const res = await post<any>('/api/skills/import_github', { repo_url: githubUrl });
+            addToast({ id: crypto.randomUUID(), type: 'success', message: res.message || 'Skills imported successfully' });
+            setGithubUrl("");
+            fetchSkills();
+        } catch (e: any) {
+            addToast({ id: crypto.randomUUID(), type: 'error', message: e.message || 'Failed to import skills from GitHub' });
+        } finally {
+            setImporting(false);
         }
     };
 
@@ -180,6 +220,26 @@ Return ONLY python code, no markdown wrappers.`;
                     </div>
 
                     <div className="flex flex-col gap-4">
+                        <div className="text-[10px] text-[var(--nova-muted)] tracking-widest border-b border-[var(--nova-border)] pb-2 uppercase">IMPORT FROM GITHUB</div>
+                        <div className="nova-card p-4 flex flex-col gap-3 text-xs">
+                            <input 
+                                type="text" 
+                                placeholder="GitHub Repo URL (e.g., https://github.com/alirezarezvani/claude-skills)" 
+                                className="bg-[var(--nova-surface2)] text-[var(--nova-text)] p-2 outline-none rounded" 
+                                value={githubUrl} 
+                                onChange={e => setGithubUrl(e.target.value)} 
+                            />
+                            <button
+                                onClick={handleImportGithub}
+                                disabled={importing}
+                                className="bg-[var(--nova-accent)] text-black p-2 font-bold tracking-widest rounded hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                            >
+                                {importing ? 'IMPORTING...' : 'IMPORT SKILLS'}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-4">
                         <div className="text-[10px] text-[var(--nova-muted)] tracking-widest border-b border-[var(--nova-border)] pb-2 uppercase">BUILD CUSTOM SKILL</div>
                         <div className="nova-card p-4 flex flex-col gap-3 text-xs">
                             <input type="text" placeholder="Skill Name (e.g., Notion Sync)" className="bg-[var(--nova-surface2)] text-[var(--nova-text)] p-2 outline-none rounded" value={bName} onChange={e => setBName(e.target.value)} />
@@ -202,7 +262,7 @@ Return ONLY python code, no markdown wrappers.`;
                                     </div>
                                     <button
                                         className="border border-[var(--nova-accent)] text-[var(--nova-accent)] p-2 font-bold tracking-widest rounded hover:bg-[var(--nova-accent)] hover:text-black transition-colors cursor-pointer"
-                                        onClick={() => addToast({ id: crypto.randomUUID(), type: 'info', message: 'Custom installation not fully wired' })}
+                                        onClick={handleInstallCustom}
                                     >
                                         INSTALL GENERATED SKILL
                                     </button>

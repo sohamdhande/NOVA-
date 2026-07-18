@@ -30,6 +30,7 @@ auth_manager = None
 health_engine = None
 context_engine = None
 chat_engine = None
+main_loop = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -85,7 +86,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 from api.routes import router as approvals_router
+from api.distill import router as distill_router
+from api.knowledge_routes import router as knowledge_router
+
 app.include_router(approvals_router, prefix="/api")
+app.include_router(distill_router, prefix="/api")
+app.include_router(knowledge_router, prefix="/api/knowledge")
 
 # --- Middleware ---
 @app.middleware("http")
@@ -113,20 +119,25 @@ async def auth_middleware(request: Request, call_next):
             raise ValueError("Invalid Header Format")
         token = parts[1]
     except Exception:
-         return JSONResponse(
+        return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Invalid Authorization header format"}
         )
     
     # Validate token — try password auth first, then biometric session
     from core.biometric import biometric_auth as _bio_auth
-    token_valid = (auth_manager and auth_manager.validate_token(token)) or _bio_auth.is_session_valid()
+    
+    is_pwd_valid = auth_manager and auth_manager.validate_token(token)
+    is_bio_valid = _bio_auth.is_session_valid()
+    
+    token_valid = is_pwd_valid or is_bio_valid
     
     if not token_valid:
         return JSONResponse(
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"detail": "Token expired or invalid"}
         )
+
         
     return await call_next(request)
 

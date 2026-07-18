@@ -28,7 +28,6 @@ export function MonitorPanel() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [events, setEvents] = useState<Array<{ time: string; source: string; type: string; priority: number }>>([]);
-    const [lastUpdated, setLastUpdated] = useState(new Date());
     const [runningBtn, setRunningBtn] = useState("");
 
     const fetchMetrics = useCallback(async () => {
@@ -36,7 +35,6 @@ export function MonitorPanel() {
             const d = await get<Metrics>("/api/metrics");
             setMetrics(d);
             setError("");
-            setLastUpdated(new Date());
         } catch (e: any) {
             setError(e.message ?? "Telemetry drop");
         } finally {
@@ -168,7 +166,7 @@ export function MonitorPanel() {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {m.processes.map((p, i) => (
+                                    {m.processes.map((p) => (
                                         <tr key={p.pid} className={`border-b border-[var(--nova-border)]/30 transition-colors ${p.cpu > 20 ? 'bg-[var(--nova-amber)]/5 hover:bg-[var(--nova-amber)]/10' : 'hover:bg-[var(--nova-surface2)]'}`}>
                                             <td className={`py-2.5 px-4 font-bold truncate max-w-[200px] ${p.cpu > 20 ? 'text-[var(--nova-amber)]' : 'text-[var(--nova-text)]'}`}>
                                                 {p.name}

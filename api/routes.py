@@ -12,7 +12,7 @@ router = APIRouter()
 async def get_status():
     return {
         "status": "online",
-        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile")
+        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.1-8b-instant")
     }
 
 @router.post("/nova/shutdown")
@@ -86,7 +86,7 @@ event_bus.subscribe("approval_required", _on_approval_required)
 
 @router.get("/approvals")
 def get_approvals():
-    conn = sqlite3.connect("nova_logs.db", check_same_thread=False)
+    conn = _get_db()
     rows = conn.execute("""
         SELECT id, timestamp, payload 
         FROM events 
@@ -370,7 +370,8 @@ def get_metrics():
     import psutil, time, platform
 
     # CPU
-    cpu_percent = psutil.cpu_percent(interval=0.3)
+    # Use interval=None to prevent blocking the API thread for 300ms on every call
+    cpu_percent = psutil.cpu_percent(interval=None)
     cpu_count = psutil.cpu_count()
     cpu_freq = psutil.cpu_freq()
     load_avg = psutil.getloadavg() if hasattr(psutil, 'getloadavg') else (0, 0, 0)
@@ -478,8 +479,8 @@ def _goals_db():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS goals (
             id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            target TEXT,
+            title TEXT DEFAULT 'Goal',
+            target TEXT DEFAULT '',
             deadline TEXT,
             progress INTEGER DEFAULT 0,
             status TEXT DEFAULT 'active',
@@ -487,6 +488,18 @@ def _goals_db():
                 (datetime('now'))
         )
     """)
+    try:
+        existing_cols = [row[1] for row in conn.execute("PRAGMA table_info(goals)").fetchall()]
+        if "title" not in existing_cols:
+            conn.execute("ALTER TABLE goals ADD COLUMN title TEXT DEFAULT 'Goal'")
+        if "target" not in existing_cols:
+            conn.execute("ALTER TABLE goals ADD COLUMN target TEXT DEFAULT ''")
+        if "progress" not in existing_cols:
+            conn.execute("ALTER TABLE goals ADD COLUMN progress INTEGER DEFAULT 0")
+        if "description" not in existing_cols:
+            conn.execute("ALTER TABLE goals ADD COLUMN description TEXT DEFAULT ''")
+    except Exception:
+        pass
     conn.commit()
     return conn
 
@@ -935,6 +948,80 @@ def get_memory():
         ]
     })
 
+from pydantic import BaseModel
+from typing import List, Optional, Any
+
+class MemoryAddRequest(BaseModel):
+    project: str = "general"
+    source_type: str
+    title: str
+    summary: str
+    tags: List[str] = []
+    raw_data: Optional[Any] = None
+
+@router.post("/memory/add")
+async def add_memory(req: MemoryAddRequest):
+    try:
+        from core.api_server import nova_app
+        if not nova_app or not hasattr(nova_app, 'memory_store') or not nova_app.memory_store:
+            raise HTTPException(status_code=500, detail="Memory subsystem offline")
+            
+        result = nova_app.memory_store.add_entry(
+            project=req.project,
+            source_type=req.source_type,
+            title=req.title,
+            summary=req.summary,
+            tags=req.tags
+        )
+        
+        # Publish memory save event to event bus for real-time dashboard updates
+        try:
+            from core.event_bus import event_bus, NovaEvent
+            await event_bus.publish(NovaEvent(
+                source="memory_store",
+                type="memory_saved",
+                payload={
+                    "project": req.project,
+                    "title": req.title,
+                    "source_type": req.source_type
+                },
+                priority=3
+            ))
+        except Exception:
+            pass  # Non-critical: event bus notification
+        
+        return {"status": "success", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memory/projects")
+async def get_memory_projects():
+    """Returns list of all unique project names in memory."""
+    try:
+        from core.api_server import nova_app
+        if not nova_app or not hasattr(nova_app, 'memory_store') or not nova_app.memory_store:
+            return {"projects": []}
+        
+        projects = nova_app.memory_store.get_projects()
+        return {"projects": projects}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/memory/project/{project}")
+async def get_memory_project_summary(project: str):
+    """Returns high-level summary of a project's stored memory."""
+    try:
+        from core.api_server import nova_app
+        if not nova_app or not hasattr(nova_app, 'memory_store') or not nova_app.memory_store:
+            raise HTTPException(status_code=500, detail="Memory subsystem offline")
+        
+        summary = nova_app.memory_store.get_project_summary(project)
+        return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ─────────────────────────────────────────
 # Reasoning
@@ -951,7 +1038,7 @@ def get_reasoning():
         ],
         "confidence": 87,
         "last_inference_ms": 1840,
-        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile"),
+        "model": os.getenv("GROQ_MODEL_LARGE", "llama-3.1-8b-instant"),
         "recent_thoughts": [
             "No urgent emails detected.",
             "Task deadline approaching in 2h.",
@@ -1035,14 +1122,44 @@ def approve_comm(message_id: str):
 # Skills
 # ─────────────────────────────────────────
 
-# STUB - replace with real data
+# STUB - available skills
 @router.get("/skills")
 def get_skills():
+    from infrastructure.skill_loader import SKILL_REGISTRY, scan_skills
+    from infrastructure.skill_engine import skill_engine
+    
+    # Reload to get fresh list
+    scan_skills()
+    skill_engine._load_skills()
+    
+    installed = []
+    
+    # 1. Add System Skills
+    for name, path in SKILL_REGISTRY.items():
+        installed.append({
+            "id": f"sys_{name}",
+            "name": name.capitalize(),
+            "description": f"System skill located at {path}",
+            "version": "1.0",
+            "active": True,
+            "runs": 0,
+            "last_used": "System"
+        })
+        
+    # 2. Add Custom Skills
+    for skill in skill_engine.list_skills():
+        installed.append({
+            "id": skill.id,
+            "name": skill.name,
+            "description": skill.description,
+            "version": "Custom",
+            "active": skill.enabled,
+            "runs": skill.run_count,
+            "last_used": "Workflow"
+        })
+        
     return JSONResponse(content={
-        "installed": [
-            {"id": "sk1", "name": "PDF Summarizer", "version": "1.0", "status": "active", "runs": 14},
-            {"id": "sk2", "name": "Calendar Sync", "version": "1.2", "status": "active", "runs": 89}
-        ],
+        "installed": installed,
         "available": [
             {"id": "sk3", "name": "Web Scraper", "description": "Scrape and parse any webpage"},
             {"id": "sk4", "name": "Repo Summarizer", "description": "Summarize any GitHub repo"},
@@ -1059,6 +1176,118 @@ class SkillInstall(BaseModel):
 @router.post("/skills/install")
 def install_skill(req: SkillInstall):
     return JSONResponse(content={"status": "installing", "skill_id": req.skill_id})
+
+@router.post("/skills/install_custom")
+async def install_custom_skill(request: Request):
+    from infrastructure.skill_engine import skill_engine
+    import uuid, json, os
+    
+    try:
+        data = await request.json()
+        skill_id = data.get("id", f"custom_{uuid.uuid4().hex[:6]}")
+        data["id"] = skill_id
+        
+        # Save to ~/.nova/skills
+        path = os.path.join(skill_engine.SKILLS_DIR, f"{skill_id}.json")
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+            
+        skill_engine._load_skills()
+        return JSONResponse(content={"status": "success", "id": skill_id})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+class GitHubImportReq(BaseModel):
+    repo_url: str
+
+
+@router.post("/skills/import_github")
+async def import_github_skills(req: GitHubImportReq):
+    import os
+    import shutil
+    import requests
+    import zipfile
+    import io
+    from infrastructure.skill_loader import SKILLS_DIR, scan_skills
+    
+    url = req.repo_url.strip().rstrip("/")
+    if "github.com/" not in url:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Only GitHub URLs are supported."})
+        
+    parts = url.split("github.com/")[-1].split("/")
+    if len(parts) < 2:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid GitHub repository URL."})
+        
+    owner_repo = f"{parts[0]}/{parts[1]}"
+    zip_url = f"https://github.com/{owner_repo}/archive/refs/heads/main.zip"
+    
+    try:
+        response = requests.get(zip_url, timeout=30)
+        if response.status_code != 200:
+            zip_url_master = f"https://github.com/{owner_repo}/archive/refs/heads/master.zip"
+            response = requests.get(zip_url_master, timeout=30)
+            if response.status_code != 200:
+                return JSONResponse(status_code=404, content={"status": "error", "message": f"Failed to download repository ZIP from GitHub (tried main & master branches)."})
+                
+        imported_count = 0
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+            members = zip_ref.namelist()
+            
+            # Find all SKILL.md files and their exact parent directories
+            skill_roots = []
+            for member in members:
+                if member.endswith("SKILL.md"):
+                    parent_dir = member[:-len("SKILL.md")]
+                    skill_roots.append(parent_dir)
+            
+            seen_skills = set()
+            for root_prefix in skill_roots:
+                parts = root_prefix.rstrip("/").split("/")
+                if not parts:
+                    continue
+                
+                # The skill name is the folder immediately containing SKILL.md
+                skill_name = parts[-1]
+                
+                # Verify this is a real SKILL.md and NOT a symlink text file
+                # Real skills must have YAML frontmatter starting with "---"
+                try:
+                    skill_content = zip_ref.read(f"{root_prefix}SKILL.md")
+                    if not skill_content.lstrip().startswith(b"---"):
+                        continue
+                except:
+                    continue
+                
+                # Deduplicate: Skip if we already extracted a skill with this name from another directory 
+                # (e.g. .gemini/ vs c-level-advisor/)
+                if skill_name in seen_skills:
+                    continue
+                seen_skills.add(skill_name)
+                
+                dest_skill_dir = os.path.join(SKILLS_DIR, skill_name)
+                os.makedirs(dest_skill_dir, exist_ok=True)
+                
+                # Extract all files that belong to this skill folder
+                for member in members:
+                    if member.startswith(root_prefix) and not member.endswith("/"):
+                        relative_path = member[len(root_prefix):]
+                        target_path = os.path.join(dest_skill_dir, relative_path)
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                        with zip_ref.open(member) as source, open(target_path, 'wb') as dest:
+                            shutil.copyfileobj(source, dest)
+                
+                imported_count += 1
+                    
+        scan_skills()
+        return JSONResponse(content={
+            "status": "success", 
+            "message": f"Successfully imported {imported_count} skills from GitHub!"
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
 
 
 # ─────────────────────────────────────────
@@ -1218,51 +1447,100 @@ def remove_from_whitelist(command: str):
     return JSONResponse(content={"status": "removed"})
 
 
-# ─────────────────────────────────────────
-# Settings
-# ─────────────────────────────────────────
+import json
+import os
+import threading
 
-# STUB - replace with real data
+SETTINGS_FILE = "nova_settings.json"
+
+def load_settings():
+    default_settings = {
+        "interval_reasoning": 60,
+        "threshold_battery": 15,
+        "interval_telemetry": 300,
+        "retention_log": 30,
+        "notifs": {
+            "system_alerts": True,
+            "email_notifications": False,
+            "slack_notifications": True,
+            "task_reminders": True
+        }
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                loaded = json.load(f)
+                default_settings.update(loaded)
+        except Exception:
+            pass
+    return default_settings
+
+def save_settings(settings: dict):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f)
+
 @router.get("/settings")
 def get_settings():
-    return JSONResponse(content={
-        "reasoning_interval_minutes": 60,
-        "battery_threshold": 15,
-        "telemetry_interval_seconds": 300,
-        "notifications_enabled": True,
-        "auto_cleanup_enabled": True,
-        "cleanup_interval_hours": 24,
-        "model": "mistral:7b-instruct",
-        "log_retention_days": 30
-    })
+    return JSONResponse(content=load_settings())
 
-
-# STUB - replace with real data
 @router.post("/settings")
 def update_settings(req: dict):
+    current = load_settings()
+    current.update(req)
+    save_settings(current)
     return JSONResponse(content={"status": "updated"})
 
+@router.post("/settings/model")
+def update_model(req: dict):
+    model = req.get("model", "llama3.2")
+    # Read .env and update
+    try:
+        if os.path.exists(".env"):
+            with open(".env", "r") as f:
+                lines = f.readlines()
+            with open(".env", "w") as f:
+                for line in lines:
+                    if line.startswith("PRIMARY_MODEL="):
+                        f.write(f"PRIMARY_MODEL={model}\n")
+                    else:
+                        f.write(line)
+    except Exception as e:
+        print(f"Failed to update model in .env: {e}")
+    return JSONResponse(content={"status": "model_updated", "model": model})
+
+@router.post("/settings/notifications")
+def update_notifications(req: dict):
+    current = load_settings()
+    if "notifs" not in current:
+        current["notifs"] = {}
+    current["notifs"].update(req)
+    save_settings(current)
+    return JSONResponse(content={"status": "notifications_updated"})
 
 # ─────────────────────────────────────────
 # Nova Control
 # ─────────────────────────────────────────
 
-# STUB - replace with real data
 @router.post("/nova/pause")
 def pause_nova():
     return JSONResponse(content={"status": "paused", "autonomy": False})
 
-
-# STUB - replace with real data
 @router.post("/nova/resume")
 def resume_nova():
     return JSONResponse(content={"status": "resumed", "autonomy": True})
 
-
-# STUB - replace with real data
 @router.post("/nova/reasoning-cycle")
 def trigger_reasoning_cycle():
     return JSONResponse(content={"status": "triggered", "cycle_id": "rc_123"})
+
+@router.post("/nova/shutdown")
+def trigger_shutdown():
+    def shutdown_process():
+        import time
+        time.sleep(1)
+        os._exit(0)
+    threading.Thread(target=shutdown_process).start()
+    return JSONResponse(content={"status": "shutting_down"})
 
 
 # STUB - replace with real data

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVA Knowledge OS — Developer Studio</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --sidebar: #161b22;
+            --card: #21262d;
+            --border: #30363d;
+            --text: #c9d1d9;
+            --text-bold: #f0f6fc;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --accent-bg: #1f6feb;
+            --success: #238636;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            font-size: 14px;
+        }
+        aside {
+            width: 240px;
+            background-color: var(--sidebar);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 1rem 0;
+        }
+        .brand {
+            padding: 0 1rem 1rem;
+            font-weight: 700;
+            font-size: 16px;
+            color: var(--text-bold);
+            border-bottom: 1px solid var(--border);
+            letter-spacing: -0.5px;
+        }
+        nav { padding: 1rem 0; display: flex; flex-direction: column; }
+        nav button {
+            background: none;
+            border: none;
+            color: var(--text);
+            padding: 8px 16px;
+            text-align: left;
+            font-size: 14px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+        nav button:hover { background-color: var(--card); }
+        nav button.active {
+            color: var(--accent);
+            border-left-color: var(--accent);
+            background-color: rgba(88, 166, 255, 0.1);
+            font-weight: 600;
+        }
+        main {
+            flex-grow: 1;
+            padding: 1.5rem 2rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .view-section { display: none; }
+        .view-section.active { display: flex; flex-direction: column; gap: 1.5rem; }
+        h1, h2, h3 { margin: 0; color: var(--text-bold); }
+        h1 { font-size: 20px; font-weight: 600; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        .card {
+            background-color: var(--sidebar);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--text-muted); font-weight: 600; background-color: var(--card); }
+        tr:hover td { background-color: var(--card); }
+        input, textarea, select {
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            padding: 6px 12px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        input:focus, textarea:focus { border-color: var(--accent); outline: none; }
+        button.btn {
+            background-color: var(--card);
+            color: var(--text-bold);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        button.btn-primary { background-color: var(--success); border-color: rgba(255,255,255,0.1); color: white; }
+        button.btn:hover { border-color: var(--text-muted); }
+        pre, code { font-family: ui-monospace, SFMono-Regular, SF Monospace, Menlo, Consolas, monospace; }
+        pre { background-color: var(--bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border); overflow-x: auto; margin: 0; }
+        .badge { display: inline-block; padding: 2px 6px; font-size: 11px; font-weight: 600; border-radius: 2em; background-color: var(--card); border: 1px solid var(--border); }
+        .link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+        .link:hover { color: #79c0ff; }
+        .adjacent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <aside>
+        <div class="brand">NOVA Studio</div>
+        <nav>
+            <button onclick="switchTab('explorer')" id="tab-explorer" class="active">Graph Explorer</button>
+            <button onclick="switchTab('inspect')" id="tab-inspect">Universal Inspect</button>
+            <button onclick="switchTab('search')" id="tab-search">Search Graph</button>
+            <button onclick="switchTab('timeline')" id="tab-timeline">Activity Log</button>
+            <button onclick="switchTab('ingest')" id="tab-ingest">Ingest Artifact</button>
+        </nav>
+    </aside>
+
+    <main>
+        <!-- GRAPH EXPLORER -->
+        <div id="view-explorer" class="view-section active">
+            <h1>Hierarchical Knowledge Browser</h1>
+            <div class="card">
+                <p style="margin-top:0;color:var(--text-muted)">Navigate adjacent objects across the semantic hierarchy: Artifact → Observation → Entity → Commit without manual ID lookups.</p>
+                <button class="btn" onclick="loadGraph()">Refresh Browser</button>
+                <div id="explorer-content" style="margin-top:16px;">Click refresh to load hierarchy...</div>
+            </div>
+        </div>
+
+        <!-- UNIVERSAL INSPECT -->
+        <div id="view-inspect" class="view-section">
+            <h1>Universal Object Inspector</h1>
+            <div style="display:flex;gap:10px;">
+                <input type="text" id="inspect-id-input" placeholder="Enter ID (Commit, Fact, Artifact, Entity)..." style="flex-grow:1;" />
+                <button class="btn btn-primary" onclick="inspectObject()">Inspect</button>
+            </div>
+            <div id="inspect-card" class="card" style="display:none;"></div>
+        </div>
+
+        <!-- SEARCH -->
+        <div id="view-search" class="view-section">
+            <h1>Deterministic Substring Search</h1>
+            <div style="display:flex;gap:10px;">
+                <input type="text" id="search-input" placeholder="Search entities, artifacts, commits, content..." style="flex-grow:1;" onkeyup="if(event.key==='Enter')searchGraph()" />
+                <button class="btn" onclick="searchGraph()">Search</button>
+            </div>
+            <div class="card">
+                <table id="search-results-table">
+                    <thead><tr><th>Type</th><th>ID</th><th>Summary / Snippet</th><th>Action</th></tr></thead>
+                    <tbody><tr><td colspan="4" style="text-align:center;color:var(--text-muted)">No search performed yet.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- TIMELINE -->
+        <div id="view-timeline" class="view-section">
+            <h1>Chronological Runtime Activity</h1>
+            <div class="card">
+                <button class="btn" onclick="loadTimeline()">Refresh Timeline</button>
+                <table id="timeline-table" style="margin-top:16px;">
+                    <thead><tr><th>Timestamp</th><th>Type</th><th>Commit ID</th><th>Activity Summary</th></tr></thead>
+                    <tbody><tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Click refresh to load.</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- INGEST -->
+        <div id="view-ingest" class="view-section">
+            <h1>Ingest Plaintext Fact</h1>
+            <div class="card" style="display:flex;flex-direction:column;gap:12px;">
+                <textarea id="ingest-text" rows="5" placeholder="Enter raw fact text..."></textarea>
+                <button class="btn btn-primary" style="align-self:flex-start;" onclick="ingestFact()">Compile Artifact</button>
+                <pre id="ingest-result">Waiting for artifact compilation...</pre>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API = "http://localhost:8000";
+
+        function switchTab(tabId) {
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+            document.getElementById(`tab-${tabId}`).classList.add('active');
+            document.getElementById(`view-${tabId}`).classList.add('active');
+            if(tabId === 'explorer') loadGraph();
+            if(tabId === 'timeline') loadTimeline();
+        }
+
+        function triggerInspect(id) {
+            switchTab('inspect');
+            document.getElementById('inspect-id-input').value = id;
+            inspectObject();
+        }
+
+        async function inspectObject() {
+            const id = document.getElementById('inspect-id-input').value.trim();
+            if(!id) return;
+            const card = document.getElementById('inspect-card');
+            card.style.display = 'block';
+            card.innerHTML = `<span style="color:var(--text-muted)">Inspecting runtime state for <strong>${id}</strong>...</span>`;
+            try {
+                const res = await fetch(`${API}/inspect/${encodeURIComponent(id)}`);
+                const data = await res.json();
+                
+                let relHtml = data.relationships.map(r => `<span class="badge">${r.relation}</span> <span class="link" onclick="triggerInspect('${r.target}')">${r.target}</span>`).join('<br/>') || 'None';
+                let provHtml = data.provenance.map(p => `<span class="link" onclick="triggerInspect('${p}')">${p}</span>`).join(' → ') || 'None';
+                let evidHtml = data.supporting_evidence.map(e => `<span class="link" onclick="triggerInspect('${e}')">${e}</span>`).join(', ') || 'None';
+                let commHtml = data.related_commits.map(c => `<span class="link" onclick="triggerInspect('${c}')">${c}</span>`).join(', ') || 'None';
+
+                card.innerHTML = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px;">
+                        <span class="badge" style="background-color:var(--accent-bg);color:white;font-size:12px;">${data.object_type}</span>
+                        <strong style="font-size:16px;">${id}</strong>
+                    </div>
+                    <p style="font-size:15px;color:var(--text-bold);margin:0 0 16px;">${data.summary}</p>
+                    <div class="adjacent-grid">
+                        <div style="background:var(--bg);padding:10px;border-radius:4px;border:1px solid var(--border);"><strong>Relationships:</strong><br/>${relHtml}</div>
+                        <div style="background:var(--bg);padding:10px;border-radius:4px;border:1px solid var(--border);"><strong>Provenance Traversal:</strong><br/>${provHtml}</div>
+                        <div style="background:var(--bg);padding:10px;border-radius:4px;border:1px solid var(--border);"><strong>Supporting Evidence:</strong><br/>${evidHtml}</div>
+                        <div style="background:var(--bg);padding:10px;border-radius:4px;border:1px solid var(--border);"><strong>Related Commits:</strong><br/>${commHtml}</div>
+                    </div>
+                    <h3 style="margin:16px 0 8px;font-size:13px;color:var(--text-muted)">Raw Metadata Payload</h3>
+                    <pre>${JSON.stringify(data.metadata, null, 2)}</pre>
+                `;
+            } catch(e) {
+                card.innerHTML = `<span style="color:#f85149">Failed to inspect object: ${e}</span>`;
+            }
+        }
+
+        async function loadGraph() {
+            const cont = document.getElementById('explorer-content');
+            try {
+                const res = await fetch(`${API}/explore`);
+                const g = await res.json();
+                
+                let obsRows = g.observations.map(o => `
+                    <tr>
+                        <td><span class="link" onclick="triggerInspect('${o.id}')">${o.id}</span></td>
+                        <td><span class="badge">${o.op}</span></td>
+                        <td><span class="link" onclick="triggerInspect('${o.adjacent_commit}')">${o.adjacent_commit.slice(0,8)}</span></td>
+                        <td><span class="link" onclick="triggerInspect('${o.adjacent_artifact}')">${o.adjacent_artifact}</span></td>
+                        <td><span class="link" onclick="triggerInspect('${o.adjacent_entity}')">${o.adjacent_entity}</span></td>
+                    </tr>
+                `).join('');
+
+                cont.innerHTML = `
+                    <h3>Adjacent Traversal Matrix (${g.observations.length} Compiled Observations)</h3>
+                    <table style="margin-top:10px;">
+                        <thead><tr><th>Observation ID</th><th>Op</th><th>Commit (Adjacent)</th><th>Artifact (Adjacent)</th><th>Entity (Adjacent)</th></tr></thead>
+                        <tbody>${obsRows || '<tr><td colspan="5">No graph compiled yet.</td></tr>'}</tbody>
+                    </table>
+                `;
+            } catch(e) {
+                cont.innerHTML = `Error loading graph: ${e}`;
+            }
+        }
+
+        async function searchGraph() {
+            const q = document.getElementById('search-input').value.trim();
+            const tbody = document.querySelector('#search-results-table tbody');
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center">Searching...</td></tr>`;
+            try {
+                const res = await fetch(`${API}/search?q=${encodeURIComponent(q)}`);
+                const matches = await res.json();
+                tbody.innerHTML = matches.map(m => `
+                    <tr>
+                        <td><span class="badge">${m.type}</span></td>
+                        <td><span class="link" onclick="triggerInspect('${m.id}')">${m.id}</span></td>
+                        <td>${m.text}</td>
+                        <td><button class="btn" onclick="triggerInspect('${m.id}')">Inspect</button></td>
+                    </tr>
+                `).join('') || `<tr><td colspan="4" style="text-align:center">No deterministic matches found.</td></tr>`;
+            } catch(e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="color:red">Search error: ${e}</td></tr>`;
+            }
+        }
+
+        async function loadTimeline() {
+            const tbody = document.querySelector('#timeline-table tbody');
+            try {
+                const res = await fetch(`${API}/timeline`);
+                const events = await res.json();
+                tbody.innerHTML = events.map(ev => `
+                    <tr>
+                        <td><code style="color:var(--text-muted)">${ev.timestamp.replace('T',' ').slice(0,19)}</code></td>
+                        <td><span class="badge">${ev.type}</span></td>
+                        <td><span class="link" onclick="triggerInspect('${ev.id}')">${ev.id}</span></td>
+                        <td>${ev.summary}</td>
+                    </tr>
+                `).join('') || `<tr><td colspan="4" style="text-align:center">No runtime activity.</td></tr>`;
+            } catch(e) {
+                tbody.innerHTML = `<tr><td colspan="4">Error: ${e}</td></tr>`;
+            }
+        }
+
+        async function ingestFact() {
+            const txt = document.getElementById('ingest-text').value.trim();
+            const resBox = document.getElementById('ingest-result');
+            if(!txt) return;
+            resBox.innerText = "Compiling...";
+            try {
+                const res = await fetch(`${API}/ingest`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({source_type: 'plaintext', content: txt})
+                });
+                const data = await res.json();
+                resBox.innerText = JSON.stringify(data, null, 2);
+                if(data.fact_id) loadGraph();
+            } catch(e) {
+                resBox.innerText = `Compilation failure: ${e}`;
+            }
+        }
+
+        window.onload = loadGraph;
+    </script>
+</body>
+</html>

@@ -36,7 +36,7 @@ export function HQPanel() {
     const [showAutocomplete, setShowAutocomplete] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(new Date());
     const [lastVoiceCommand, setLastVoiceCommand] = useState("");
-    const { connected, lastEvent } = useEventBus();
+    const { lastEvent } = useEventBus();
     const [resourceStats, setResourceStats] = useState<any>(null);
     const chatBoxRef = useRef<HTMLDivElement>(null);
 
@@ -331,10 +331,10 @@ export function HQPanel() {
             <div className="grid grid-cols-5 gap-8 h-full">
                 {/* LEFT COLUMN */}
                 <div className="col-span-3 flex flex-col gap-2">
-                    {/* Health Ring */}
-                    <div className="relative flex items-center justify-center w-60 h-60 mx-auto mt-2">
-                      {/* Outer glow ring */}
-                      <div className={`absolute inset-0 rounded-full blur-xl opacity-40 transition-all duration-1000
+                    {/* Premium Health Ring */}
+                    <div className="relative flex items-center justify-center w-64 h-64 mx-auto mt-4 group">
+                      {/* Outer intense glow that pulses */}
+                      <div className={`absolute inset-0 rounded-full blur-[40px] opacity-20 group-hover:opacity-40 transition-all duration-1000 animate-pulse
                         ${healthScore >= 80 
                           ? 'bg-[#00ffcc]' 
                           : healthScore >= 60
@@ -342,37 +342,59 @@ export function HQPanel() {
                           : 'bg-red-500'
                         }`} />
                       
-                      {/* Outer dashed rotating ring */}
-                      <svg className="absolute w-[110%] h-[110%] animate-[spin_40s_linear_infinite]" viewBox="0 0 140 140">
-                         <circle cx="70" cy="70" r="68" fill="none" stroke="rgba(0,255,204,0.15)" strokeWidth="1" strokeDasharray="4 8" />
+                      {/* Outer dashed rotating ring - highly detailed */}
+                      <svg className="absolute w-[115%] h-[115%] animate-[spin_60s_linear_infinite] opacity-60 group-hover:opacity-100 transition-opacity duration-1000" viewBox="0 0 140 140">
+                         <circle cx="70" cy="70" r="68" fill="none" stroke="url(#ringGrad1)" strokeWidth="0.5" strokeDasharray="2 6" />
                       </svg>
 
                       {/* Inner counter-rotating ring */}
-                      <svg className="absolute w-[95%] h-[95%] animate-[spin_20s_linear_infinite_reverse]" viewBox="0 0 140 140">
-                         <circle cx="70" cy="70" r="64" fill="none" stroke="rgba(0,255,204,0.05)" strokeWidth="2" strokeDasharray="20 40" />
+                      <svg className="absolute w-[105%] h-[105%] animate-[spin_30s_linear_infinite_reverse] opacity-40 group-hover:opacity-80 transition-opacity duration-1000" viewBox="0 0 140 140">
+                         <circle cx="70" cy="70" r="64" fill="none" stroke="url(#ringGrad2)" strokeWidth="1.5" strokeDasharray="15 30" strokeLinecap="round" />
                       </svg>
 
-                      {/* Main SVG Ring */}
-                      <svg className="absolute w-full h-full -rotate-90 drop-shadow-[0_0_10px_rgba(0,255,204,0.2)]" viewBox="0 0 120 120">
-                        {/* Background track */}
-                        <circle cx="60" cy="60" r="54" fill="none" stroke="rgba(0,255,204,0.05)" strokeWidth="6" />
+                      {/* Main SVG Ring with rich gradients */}
+                      <svg className="absolute w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(0,255,204,0.3)] transition-all duration-1000" viewBox="0 0 120 120">
+                        <defs>
+                          <linearGradient id="ringGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={healthScore >= 80 ? '#00ffcc' : healthScore >= 60 ? '#fbbf24' : '#ef4444'} stopOpacity="0.8" />
+                            <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id="ringGrad2" x1="100%" y1="100%" x2="0%" y2="0%">
+                            <stop offset="0%" stopColor={healthScore >= 80 ? '#0088aa' : healthScore >= 60 ? '#b45309' : '#991b1b'} stopOpacity="0.8" />
+                            <stop offset="100%" stopColor="transparent" stopOpacity="0" />
+                          </linearGradient>
+                          <linearGradient id="mainArc" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={healthScore >= 80 ? '#00ffcc' : healthScore >= 60 ? '#fbbf24' : '#ef4444'} />
+                            <stop offset="100%" stopColor={healthScore >= 80 ? '#0088aa' : healthScore >= 60 ? '#b45309' : '#7f1d1d'} />
+                          </linearGradient>
+                        </defs>
+                        {/* Background track with glass effect */}
+                        <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="8" />
+                        <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(0,0,0,0.5)" strokeWidth="8" strokeDasharray="4 8" />
+                        
                         {/* Progress arc */}
-                        <circle cx="60" cy="60" r="54" fill="none"
-                          stroke={ healthScore >= 80 ? '#00ffcc' : healthScore >= 60 ? '#fbbf24' : '#ef4444' }
-                          strokeWidth="6" strokeLinecap="round" strokeDasharray={`${339.3}`}
-                          strokeDashoffset={`${339.3 - (healthScore / 100) * 339.3}`}
+                        <circle cx="60" cy="60" r="52" fill="none"
+                          stroke="url(#mainArc)"
+                          strokeWidth="8" strokeLinecap="round" strokeDasharray={`${2 * Math.PI * 52}`}
+                          strokeDashoffset={`${(2 * Math.PI * 52) - (healthScore / 100) * (2 * Math.PI * 52)}`}
                           className="transition-all duration-1000 ease-out"
-                          style={{ filter: `drop-shadow(0 0 8px ${ healthScore >= 80 ? 'rgba(0,255,204,0.5)' : healthScore >= 60 ? 'rgba(251,191,36,0.5)' : 'rgba(239,68,68,0.5)' })` }}
                         />
                       </svg>
                       
-                      {/* Center content */}
-                      <div className="relative flex flex-col items-center justify-center bg-[#010a0a]/80 w-40 h-40 rounded-full border border-[rgba(0,255,204,0.1)] backdrop-blur-md shadow-[inset_0_0_30px_rgba(0,0,0,0.8)] z-10 before:absolute before:inset-0 before:bg-gradient-to-b before:from-white/5 before:to-transparent before:rounded-full">
-                        <span className={`relative z-10 text-6xl font-black font-mono tracking-tighter
-                          ${healthScore >= 80 ? 'text-transparent bg-clip-text bg-gradient-to-b from-white to-[#00ffcc]' : healthScore >= 60 ? 'text-transparent bg-clip-text bg-gradient-to-b from-white to-amber-400' : 'text-transparent bg-clip-text bg-gradient-to-b from-white to-red-400'}`}>
+                      {/* Premium Center Orb */}
+                      <div className={`relative flex flex-col items-center justify-center w-44 h-44 rounded-full backdrop-blur-2xl z-10 transition-all duration-1000
+                        bg-gradient-to-br from-black/80 to-[#010a0a]/60 border border-white/5 shadow-[inset_0_0_40px_rgba(0,0,0,0.9)]
+                        group-hover:shadow-[inset_0_0_50px_${healthScore >= 80 ? 'rgba(0,255,204,0.15)' : healthScore >= 60 ? 'rgba(251,191,36,0.15)' : 'rgba(239,68,68,0.15)'}]`}>
+                        <div className="absolute inset-0 rounded-full bg-gradient-to-t from-transparent to-white/5 pointer-events-none" />
+                        <div className={`absolute -inset-2 rounded-full opacity-0 group-hover:opacity-10 transition-opacity duration-1000 bg-gradient-to-b 
+                          ${healthScore >= 80 ? 'from-[#00ffcc]' : healthScore >= 60 ? 'from-amber-400' : 'from-red-500'} to-transparent blur-md pointer-events-none`} />
+                        
+                        <span className={`relative z-10 text-7xl font-black font-mono tracking-tighter drop-shadow-2xl transition-all duration-1000
+                          ${healthScore >= 80 ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-[#e2e8f0] to-[#00ffcc]' : healthScore >= 60 ? 'text-transparent bg-clip-text bg-gradient-to-b from-white via-[#e2e8f0] to-amber-400' : 'text-transparent bg-clip-text bg-gradient-to-b from-white via-[#e2e8f0] to-red-500'}`}>
                           {healthScore}
                         </span>
-                        <span className="relative z-10 text-[10px] font-mono tracking-[0.4em] text-[#8a9a9a] mt-2 font-bold drop-shadow-md">
+                        <span className={`relative z-10 text-[10px] font-mono tracking-[0.5em] mt-3 font-bold uppercase transition-all duration-1000
+                          ${healthScore >= 80 ? 'text-[#00ffcc]/80 drop-shadow-[0_0_5px_rgba(0,255,204,0.5)]' : healthScore >= 60 ? 'text-amber-400/80 drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]' : 'text-red-500/80 drop-shadow-[0_0_5px_rgba(239,68,68,0.5)]'}`}>
                           {healthZone}
                         </span>
                       </div>

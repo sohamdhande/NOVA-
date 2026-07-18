@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import json
 import threading
@@ -54,8 +55,10 @@ def analyze_screen() -> dict:
         response = model.generate_content([prompt, img])
         
         # Parse JSON from response
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        data = json.loads(text)
+        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON object found in model response")
+        data = json.loads(match.group())
         
         SCREEN_MEMORY['last'] = {
             'timestamp': time.time(),
@@ -130,8 +133,10 @@ def click_element(element_description: str) -> str:
             "Return ONLY a JSON: {'x': pixel_x, 'y': pixel_y, 'found': true/false}"
         )
         response = model.generate_content([prompt, img])
-        text = response.text.replace("```json", "").replace("```", "").strip()
-        coords = json.loads(text)
+        match = re.search(r'\{.*\}', response.text, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON object found in model response")
+        coords = json.loads(match.group())
         
         if coords.get("found", False):
             # Scale coordinates down by half for retina displays because mss captures at 2x 

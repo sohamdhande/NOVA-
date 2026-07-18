@@ -14,8 +14,17 @@ from groq import Groq, APIError, RateLimitError, APIStatusError
 _primary = Groq(api_key=os.getenv("GROQ_API_KEY_PRIMARY"))
 _fallback = Groq(api_key=os.getenv("GROQ_API_KEY_FALLBACK"))
 
-MODEL_LARGE = os.getenv("GROQ_MODEL_LARGE", "llama-3.3-70b-versatile")   # planning, briefing
+MODEL_LARGE = os.getenv("GROQ_MODEL_LARGE", "llama-3.1-8b-instant")   # planning, briefing
 MODEL_FAST  = os.getenv("GROQ_MODEL_FAST",  "llama-3.1-8b-instant")      # memory, correction, subtasks
+
+def _mask_key_str(key: str) -> str:
+    if not key:
+        return "empty"
+    if len(key) > 8:
+        return f"{key[:4]}***{key[-4:]}"
+    elif len(key) > 4:
+        return f"{key[:2]}***{key[-2:]}"
+    return "***"
 
 
 def _chat(
@@ -41,15 +50,28 @@ def _chat(
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
 
-    for client in (_primary, _fallback):
+    client_candidates = [
+        (_primary, "GROQ_API_KEY_PRIMARY", "PRIMARY"),
+        (_fallback, "GROQ_API_KEY_FALLBACK", "FALLBACK")
+    ]
+    for idx, (cached_client, env_var, label) in enumerate(client_candidates):
+        key_val = os.getenv(env_var, "")
+        client = Groq(api_key=key_val) if key_val else cached_client
+        if not client:
+            continue
         try:
             response = client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
         except (RateLimitError, APIError, APIStatusError) as e:
-            if client is _primary:
-                print(f"[llm] Primary key failed ({type(e).__name__}), switching to fallback...")
+            masked = _mask_key_str(key_val)
+            key_desc = f"{label} [env: {env_var}, key: {masked}]"
+            if idx < len(client_candidates) - 1:
+                print(f"[llm] Key {key_desc} failed ({type(e).__name__}: {e}), switching to fallback...")
                 continue
-            raise   # fallback also failed — let caller handle it
+            print(f"[llm] Key {key_desc} also failed ({type(e).__name__}: {e})! All keys exhausted.")
+            raise
+
+
 
 
 # ===========================================================================

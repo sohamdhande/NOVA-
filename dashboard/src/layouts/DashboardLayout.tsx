@@ -11,6 +11,7 @@ import { TerminalPanel } from "../components/panels/TerminalPanel";
 import { ApprovalsPanel } from "../components/panels/ApprovalsPanel";
 import { CommsPanel } from "../components/panels/CommsPanel";
 import { MemoryPanel } from "../components/panels/MemoryPanel";
+import { DistillPanel } from "../components/panels/DistillPanel";
 import { ReasoningPanel } from "../components/panels/ReasoningPanel";
 import { ProductivityPanel } from "../components/panels/ProductivityPanel";
 
@@ -19,6 +20,7 @@ import { FilesPanel } from "../components/panels/FilesPanel";
 import { BrowserPanel } from "../components/panels/BrowserPanel";
 import { SecurityPanel } from "../components/panels/SecurityPanel";
 import { SettingsPanel } from "../components/panels/SettingsPanel";
+import { KnowledgePanel } from "../components/panels/knowledge/KnowledgePanel";
 
 const PANELS: Record<string, { title: string; description: string; icon: string }> = {
     hq: { title: "COMMAND CENTER", description: "Central HQ overview with live system feed", icon: "⌂" },
@@ -28,8 +30,10 @@ const PANELS: Record<string, { title: string; description: string; icon: string 
     monitor: { title: "SYSTEM MONITOR", description: "Real-time hardware and process metrics", icon: "📊" },
     approvals: { title: "APPROVAL PANEL", description: "Review and approve high-risk actions", icon: "🔐" },
     comms: { title: "COMMS HUB", description: "Email, Slack, and WhatsApp integration", icon: "💬" },
-    memory: { title: "MEMORY VIEWER", description: "Events, decisions, and reflections log", icon: "🧠" },
-    skills: { title: "SKILLS MODULE", description: "Install and manage N.O.V.A skill plugins", icon: "🔧" },
+    memory: { title: "MEMORY CORE", description: "View and edit the associative semantic graph", icon: "🧠" },
+    distill: { title: "DECISION DISTILLATION", description: "Extract structured decisions from chat threads", icon: "💎" },
+    knowledge: { title: "CHRONICLE", description: "Browse the immutable organizational knowledge graph", icon: "🧬" },
+    skills: { title: "SKILL ENGINE", description: "Manage dynamic Python skill modules", icon: "🔧" },
     reasoning: { title: "AI REASONING", description: "Inspect the inference pipeline and plans", icon: "👁" },
     productivity: { title: "PRODUCTIVITY", description: "Coding hours, focus sessions, and scores", icon: "📈" },
     files: { title: "FILE SYSTEM", description: "Downloads, duplicates, and cleanup tools", icon: "📁" },
@@ -48,6 +52,8 @@ function ActivePanel({ panelKey }: { panelKey: string }) {
         case "approvals": return <ApprovalsPanel />;
         case "comms": return <CommsPanel />;
         case "memory": return <MemoryPanel />;
+        case "distill": return <DistillPanel />;
+        case "knowledge": return <KnowledgePanel />;
         case "reasoning": return <ReasoningPanel />;
         case "productivity": return <ProductivityPanel />;
         case "skills": return <SkillsPanel />;

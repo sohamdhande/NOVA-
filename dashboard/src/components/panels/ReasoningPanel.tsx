@@ -67,14 +67,14 @@ export function ReasoningPanel() {
     if (loading) return <div className="p-6 space-y-4"><Skeleton /><Skeleton /></div>;
 
     const plan = data.plan || [];
-    const confidence = data.confidence || 0;
+    const confidence = data.confidence ?? null;
     const model = data.model || 'llama3.2';
     const lastInference = data.last_inference || 0;
     const thoughts = data.recent_thoughts || [];
 
-    const confColor = confidence > 75 ? 'text-[var(--nova-green)]' : confidence > 50 ? 'text-[var(--nova-amber)]' : 'text-[var(--nova-red)]';
-    const confBars = Math.round((confidence / 100) * 10);
-    const meterStr = '█'.repeat(Math.max(0, confBars)) + '░'.repeat(Math.max(0, 10 - confBars));
+    const confColor = confidence === null ? 'text-[var(--nova-muted)]' : confidence > 75 ? 'text-[var(--nova-green)]' : confidence > 50 ? 'text-[var(--nova-amber)]' : 'text-[var(--nova-red)]';
+    const confBars = confidence !== null ? Math.round((confidence / 100) * 10) : 0;
+    const meterStr = confidence !== null ? '█'.repeat(Math.max(0, confBars)) + '░'.repeat(Math.max(0, 10 - confBars)) : '░'.repeat(10);
 
     return (
         <div className="h-full overflow-y-auto p-6 bg-[var(--nova-bg)] font-mono text-[var(--nova-text)] flex flex-col gap-6">
@@ -96,7 +96,7 @@ export function ReasoningPanel() {
                     <div className="nova-card p-4 flex flex-col gap-4">
                         <div className="flex items-center justify-between text-xs">
                             <span className="text-[var(--nova-muted)] tracking-widest uppercase">CONFIDENCE:</span>
-                            <span className={`${confColor} tracking-[0.2em]`}>[{meterStr}] {confidence}%</span>
+                            <span className={`${confColor} tracking-[0.2em]`}>{confidence !== null ? `[${meterStr}] ${confidence}%` : "UNSPECIFIED"}</span>
                         </div>
                         <div className="flex items-center justify-between text-[10px] tracking-widest">
                             <div className="flex items-center gap-2">

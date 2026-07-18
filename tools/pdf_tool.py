@@ -186,12 +186,22 @@ def _parse_sections(content: str):
 
 def _extract_takeaways(content: str, count: int = 5):
     """Extract key sentences from content for summary box."""
+    # Heuristic: if it's heavily structured markdown, skip auto-summarization
+    headers = re.findall(r'^\s*#{1,3}\s+', content, flags=re.MULTILINE)
+    if len(headers) > 3:
+        return []
+
     sentences = re.split(r'(?<=[.!?])\s+', content)
-    # Filter out very short or bullet-like fragments
-    good = [s.strip() for s in sentences if len(s.strip()) > 20 and not s.strip().startswith('-')]
+    # Filter out very short or bullet-like fragments, OR overly long parsing failures
+    good = [s.strip() for s in sentences if 20 < len(s.strip()) < 300 and not s.strip().startswith('-')]
+    
+    # If we couldn't find at least 2 good sentences, don't force it
+    if len(good) < 2:
+        return []
+        
     # Take evenly spaced samples
     if len(good) <= count:
-        return good or ["Review the full document for details."]
+        return good
     step = max(1, len(good) // count)
     return [good[i] for i in range(0, len(good), step)][:count]
 
@@ -242,7 +252,7 @@ def preprocess_content(text: str) -> list:
 #  CREATE PDF  (main public function)
 # ════════════════════════════════════════════════════════════
 
-def create_pdf(topic: str, content: str) -> str:
+def create_pdf(topic: str, content: str, include_takeaways: bool = True) -> str:
     """
     Create a professional multi-page PDF using ReportLab Platypus.
 
@@ -316,30 +326,31 @@ def create_pdf(topic: str, content: str) -> str:
             story.append(PageBreak())
 
     # ── LAST PAGE: Key Takeaways Summary Box ──
-    story.append(PageBreak())
-    story.append(Paragraph("Key Takeaways", styles['heading']))
-    story.append(Spacer(1, 4 * mm))
+    if include_takeaways:
+        takeaways = _extract_takeaways(content)
+        if takeaways:
+            story.append(PageBreak())
+            story.append(Paragraph("Key Takeaways", styles['heading']))
+            story.append(Spacer(1, 4 * mm))
 
-    takeaways = _extract_takeaways(content)
-    takeaway_data = [[Paragraph(
-        f"• {t}",
-        ParagraphStyle('TakeawayBullet', parent=styles['base']['Normal'],
-                       fontSize=10, leading=14, textColor=PRIMARY)
-    )] for t in takeaways]
+            takeaway_data = [[Paragraph(
+                f"• {t}",
+                ParagraphStyle('TakeawayBullet', parent=styles['base']['Normal'],
+                               fontSize=10, leading=14, textColor=PRIMARY)
+            )] for t in takeaways]
 
-    if takeaway_data:
-        summary_table = Table(takeaway_data, colWidths=[150 * mm])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), LIGHT),
-            ('TEXTCOLOR', (0, 0), (-1, -1), PRIMARY),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('LEFTPADDING', (0, 0), (-1, -1), 12),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-            ('BOX', (0, 0), (-1, -1), 1, ACCENT),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ]))
-        story.append(summary_table)
+            summary_table = Table(takeaway_data, colWidths=[150 * mm])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), LIGHT),
+                ('TEXTCOLOR', (0, 0), (-1, -1), PRIMARY),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+                ('BOX', (0, 0), (-1, -1), 1, ACCENT),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(summary_table)
 
     # ── BUILD DOCUMENT ──
     doc = SimpleDocTemplate(

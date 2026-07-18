@@ -44,6 +44,7 @@ class MemoryTool:
         """
         data = params.get("data", {})
         entry = self.store.add_entry(
+            project=data.get("project", "general"),
             source_type=data.get("source_type", "manual"),
             title=data.get("title", "Untitled"),
             summary=data.get("summary", ""),

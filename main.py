@@ -30,12 +30,27 @@ async def start_system():
             conn.execute("""
             CREATE TABLE IF NOT EXISTS goals (
                 id TEXT PRIMARY KEY,
-                description TEXT,
+                title TEXT DEFAULT 'Goal',
+                description TEXT DEFAULT '',
+                target TEXT DEFAULT '',
+                progress INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'active',
                 deadline DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             """)
+            try:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(goals)").fetchall()]
+                if "title" not in cols:
+                    conn.execute("ALTER TABLE goals ADD COLUMN title TEXT DEFAULT 'Goal'")
+                if "target" not in cols:
+                    conn.execute("ALTER TABLE goals ADD COLUMN target TEXT DEFAULT ''")
+                if "progress" not in cols:
+                    conn.execute("ALTER TABLE goals ADD COLUMN progress INTEGER DEFAULT 0")
+                if "description" not in cols:
+                    conn.execute("ALTER TABLE goals ADD COLUMN description TEXT DEFAULT ''")
+            except Exception:
+                pass
             
             conn.execute("""
             CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -48,11 +63,13 @@ async def start_system():
             
             conn.execute("""
             CREATE TABLE IF NOT EXISTS events (
-                id TEXT PRIMARY KEY,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                event_type TEXT,
-                payload JSON,
-                importance INTEGER DEFAULT 1
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT,
+                type TEXT,
+                payload TEXT,
+                priority INTEGER,
+                timestamp TEXT,
+                status TEXT DEFAULT 'pending'
             );
             """)
             
@@ -181,34 +198,69 @@ async def start_system():
     except Exception as e:
         pass
 
-    # 7. Daemon
+    # 7. Daemon with supervisor (auto-restart on crash)
     try:
         if app_container:
             from core.daemon import NovaDaemon
+            import time as _time
+            from collections import deque
+
+            # Capture the main event loop so the daemon publishes onto it
+            # instead of creating a competing loop
+            main_loop = asyncio.get_running_loop()
+            api_server.main_loop = main_loop
+
             daemon = NovaDaemon(
                 memory_tool=app_container.memory_tool,
                 notion_tool=app_container.notion_tool,
-                pdf_tool=app_container.pdf_tool
+                pdf_tool=app_container.pdf_tool,
+                event_loop=main_loop
             )
             api_server.daemon = daemon
             api_server.context_engine.daemon = daemon
-            
-            daemon_thread = threading.Thread(target=daemon.run, args=(False,), daemon=True)
-            daemon_thread.start()
-            api_server.daemon_thread = daemon_thread
-            print("[NOVA] ✓ Daemon running")
+
+            def _daemon_supervisor():
+                """Supervise the daemon thread: respawn on crash, rate-limited."""
+                MAX_RESTARTS = 5
+                WINDOW_SECONDS = 600  # 10 minutes
+                restart_times = deque(maxlen=MAX_RESTARTS)
+
+                while True:
+                    daemon.running = False  # reset state before each launch
+                    t = threading.Thread(target=daemon.run, args=(False,), daemon=True)
+                    t.start()
+                    api_server.daemon_thread = t
+                    t.join()  # blocks until daemon.run() exits
+
+                    # If we get here, the daemon thread has exited
+                    now = _time.time()
+                    last_err = daemon.last_error or "unknown"
+                    print(f"[NOVA] ⚠ Daemon exited. Last error:\n{last_err}")
+
+                    # Rate-limit restarts
+                    restart_times.append(now)
+                    if len(restart_times) >= MAX_RESTARTS:
+                        oldest = restart_times[0]
+                        if now - oldest < WINDOW_SECONDS:
+                            print(f"[NOVA] ✗ Daemon crashed {MAX_RESTARTS} times in "
+                                  f"{int(now - oldest)}s — giving up. Manual restart required.")
+                            break
+
+                    backoff = 5
+                    print(f"[NOVA] ↻ Restarting daemon in {backoff}s...")
+                    _time.sleep(backoff)
+
+            supervisor_thread = threading.Thread(target=_daemon_supervisor, daemon=True)
+            supervisor_thread.start()
+            print("[NOVA] ✓ Daemon running (supervised)")
     except Exception as e:
         print(f"[NOVA] ✗ Daemon failed: {e}")
 
-    # Start voice interface
+    # Voice interface is available but OFF by default
     try:
+        # Pre-import to ensure it's ready for toggle
         from core.voice_daemon import voice_daemon
-        voice_thread = threading.Thread(
-            target=voice_daemon.start,
-            daemon=True
-        )
-        voice_thread.start()
-        print("[NOVA] Voice interface starting...")
+        print("[NOVA] Voice interface ready (Default: OFF)")
     except Exception as e:
         print(f"[NOVA] Voice unavailable: {e}")
 
@@ -275,7 +327,16 @@ async def main():
     await server.serve()
 
 if __name__ == "__main__":
+    import signal
+    import sys
+    
+    def handle_sigint(sig, frame):
+        print("\n[NOVA] Shutdown requested. Goodbye.")
+        os._exit(0)
+        
+    signal.signal(signal.SIGINT, handle_sigint)
+    
     try:
         asyncio.run(main())
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        print("\n[NOVA] Shutdown requested. Goodbye.")
+    except Exception as e:
+        print(f"[NOVA] Fatal error: {e}")

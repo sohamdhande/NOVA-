@@ -1,350 +1,76 @@
-# NOVA - Autonomous Productivity Operator
+# NOVA Knowledge Compiler
 
-**Version:** 4.0  
-**Status:** ✅ Production Ready  
-**Python:** 3.14+
+NOVA is a deterministic knowledge compiler framework that ingests diverse sources (Slack, Git, plaintext), lowers them to dialect-specific Intermediate Representations (KIR), runs deterministic topological passes, and compiles them into an immutable chronological commit hash chain. 
 
-## Overview
+## Command Line Interface (CLI)
 
-NOVA is a production-grade AI assistant with contract-hardened architecture, multi-step execution, and intelligent command processing. Built for reliability, safety, and seamless user experience.
+The NOVA CLI allows you to directly interact with the persistent SQLite backend storing compiled `KnowledgeCommit` data. 
 
-## Quick Start
+*Note: Since NOVA is deterministic, it persists execution logs (commits). Systems like `IdentityRegistry`, `TemporalIndex`, `ProvenanceGraph`, and `DependencyGraph` exist ephemerally per-session right now and will be expanded in the future.*
 
-### Installation
+### CLI Commands
 
-```bash
-# Clone repository
-git clone https://github.com/sohamdhande/NOVA-.git
-cd NOVA
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On macOS/Linux
-# venv\Scripts\activate  # On Windows
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Configuration
-
-1. **Google Calendar & Notion** (Optional)
-   - Add `credentials.json` for Google Calendar
-   - Set `NOTION_TOKEN` in `.env` for Notion integration
-
-2. **LLM Engine (Groq / Ollama)**
-   - Set `GROQ_API_KEY` in `.env` for blazing-fast inference via Groq (Primary)
-   - *Optional:* Start Local Ollama fallback by running `ollama serve`
-
-3. **External APIs**
-   - Set `TAVILY_API_KEY` in `.env` for multi-tier web searches and intelligence briefings
-
-### Run NOVA
-
-### Run NOVA
-
-**Option 1: Helper Script (Recommended)**
-```bash
-./run_nova.sh
-```
-
-**Option 2: Manual**
-```bash
-source venv/bin/activate
-python3 nova.py
-```
-
-## Features
-
-### ✅ Contract-Hardened Architecture
-- **Gibberish filtering** - Rejects invalid input before LLM
-- **Domain whitelisting** - Only approved domains execute
-- **Action contracts** - Enforced allowed actions per domain
-- **Method verification** - Prevents AttributeError crashes
-- **Zero hallucinations** - No unsafe execution paths
-
-### ✅ Intelligent Command Processing
-- **Vague command handling** - "schedule something sometime" → tomorrow at 2pm
-- **Context-aware parsing** - "tomorrow morning" → 9am, "afternoon" → 2pm
-- **Multi-step execution** - Read tasks → Schedule review (seamless)
-- **Parameter interpolation** - Data flows between steps automatically
-
-### ✅ Memory System
-- **Vector search** - Semantic memory with embeddings
-- **Keyword fallback** - Always finds relevant memories
-- **Duplicate detection** - No redundant storage
-- **Natural queries** - "What do I remember about X?"
-
-### ✅ Tool Integration
-- **Google Workspace** - Calendar event management and full Gmail integration (Read / Send)
-- **Web Intelligence** - Multi-node real-time web search (Tavily + DuckDuckGo)
-- **Notion** - Manage tasks, track progress
-- **PDF & Local Files** - Extract text, summarize documents
-- **System** - Security scanning, process tracking, OS operations
-
-### ✅ Safety & Observability
-- **Guardrails** - Daily mutation limits (3 creates, 5 updates)
-- **Telemetry** - Track usage, mutations, failures
-- **Logging** - All commands logged to SQLite
-- **Error handling** - Graceful degradation
-
-## Usage Examples
-
-### Memory
-```
-NOVA > Remember that I deployed NOVA v2 successfully
-Memory stored: 'that I deployed NOVA v2 successfully'
-
-NOVA > What do I remember about deployment?
-Knowledge on 'deployment':
-- that I deployed NOVA v2 successfully
-- that I deployed the stabilization refactor successfully
-```
-
-### Scheduling (Specific)
-```
-NOVA > schedule review meeting tomorrow at 3pm
-✓ Event 'Review meeting' created successfully.
-
-NOVA > create event next Monday at 10am
-✓ Event created successfully.
-```
-
-### Scheduling (Vague)
-```
-NOVA > schedule something sometime
-✓ Event 'Scheduled task' created for tomorrow at 2pm
-
-NOVA > schedule unfinished tasks later
-✓ Event 'Review 2 unfinished tasks' created for tomorrow at 2pm
-```
-
-### Tasks
-```
-NOVA > Show me open tasks
-Found 2 task(s).
-
-NOVA > What tasks do I have?
-Found 2 task(s).
-```
-
-### Calendar
-```
-NOVA > What's on my calendar today?
-Found 3 event(s) for today.
-```
-
-### Communications & Web Intelligence
-```
-NOVA > Check my inbox
-Inbox Briefing: 3 new unread emails...
-
-NOVA > Send an email to operative@sector.com subject Debrief body File attached
-✓ Email sent to operative@sector.com.
-
-NOVA > Give me an intel briefing on today's geopolitics
-[CLASSIFIED] Operative Briefing
-SECTION 1: GEOPOLITICAL THREAT ASSESSMENT...
-```
-
-## Architecture
-
-### Core Components
-
-```
-nova.py              # Application container & lifecycle
-controller.py        # Command routing & execution
-llm.py              # LLM planner integration
-schema.py           # Plan validation
-validator.py        # Input validation
-config.py           # Configuration
-```
-
-### Tools
-```
-tools/
-  calendar_tool.py  # Google Calendar integration
-  notion_tool.py    # Notion task management
-  memory_tool.py    # Memory operations
-  pdf_tool.py       # PDF processing
-```
-
-### Core Services
-```
-core/
-  system_tool.py    # System commands
-  guardrail.py      # Safety limits
-  telemetry.py      # Usage tracking
-```
-
-### Storage
-```
-storage/
-  memory_store.py   # Memory management
-  vector_store.py   # Semantic search
-  logger.py         # Execution logging
-```
-
-### Utilities
-```
-utils/
-  date_parser.py    # Natural language datetime parsing
-```
-
-## Command Routing
-
-```
-1. Trim & Empty Check
-2. System Commands (exit, quit)
-3. Explicit Memory Patterns (hard-coded)
-4. Gibberish Detection (pre-filter)
-5. LLM Planner Invocation
-6. Plan Validation & Correction
-7. Contract Verification
-8. Execution (single-step or multi-step)
-```
-
-## Configuration
-
-### Environment Variables (.env)
-```bash
-NOTION_TOKEN=your_notion_token_here
-HF_TOKEN=your_huggingface_token_here  # Optional
-```
-
-### Config (config.py)
-```python
-DEBUG = False                    # Enable debug logging
-MAX_CORRECTION_ATTEMPTS = 2     # Plan correction retries
-DAILY_CREATE_LIMIT = 3          # Max creates per day
-DAILY_UPDATE_LIMIT = 5          # Max updates per day
-```
-
-## Allowed Domains & Actions
-
-### Calendar
-- `create_event` - Create calendar event
-- `read_today` - Read today's schedule
-
-### Notion/Tasks
-- `create_task` - Create new task
-- `read_open` - Read open tasks
-- `update_task` - Update task status
-
-### Memory
-- `store_entry` - Store memory
-- `recall_topic` - Recall by topic
-- `search_entries` - Search memories
-
-### System
-- `morning_briefing` - Daily summary
-
-### PDF
-- `summarize` - Summarize PDF
-- `extract` - Extract text
-
-### Communications & Web (v4)
-- `gmail` - Send emails, summarize inbox, check unread threads
-- `web_search` - Query Tavily / DuckDuckGo for live internet data
-- `intel_briefing` - Synthesize formatted briefing reports
-
-## Performance
-
-- **Average command:** 5.4s
-- **Gibberish rejection:** <0.001s
-- **Memory operations:** <0.1s
-- **Multi-step scheduling:** 10-13s (LLM-dependent)
-- **No memory leaks:** Vector store loaded once
-- **No degradation:** Consistent performance over time
-
-## Testing
-
-### Stress Test Results
-✅ **20 mixed commands executed**
-- 17 passed
-- 3 correctly rejected (gibberish)
-- 0 failed
-- 100% success rate
-
-### Test Coverage
-- Memory operations ✅
-- Specific scheduling ✅
-- Vague scheduling ✅
-- Gibberish detection ✅
-- System queries ✅
-- Edge cases ✅
-
-## Documentation
-
-- **CONTRACT_HARDENING_SUMMARY.md** - Architecture & security
-- **MULTI_STEP_INTERPOLATION_FIX.md** - Parameter injection logic
-- **VAGUE_COMMAND_SOLUTION.md** - Intelligent default handling
-- **SOLUTION_SUMMARY.md** - Comprehensive feature guide
-- **STRESS_TEST_REPORT.md** - Performance validation
-- **QUICK_START.md** - Setup guide
-
-## Troubleshooting
-
-### "Command not recognized"
-- Check if command has recognized verb (schedule, create, show, etc.)
-- Avoid pure gibberish
-- Use natural language: "schedule meeting" not "asdfkjh"
-
-### LLM Connection Error
-- Ensure Ollama is running: `ollama serve`
-- Check model is pulled: `ollama pull mistral:7b-instruct`
-- Verify port 11434 is accessible
-
-### Calendar/Notion Errors
-- Check `credentials.json` exists and is valid
-- Verify `NOTION_TOKEN` in `.env`
-- Ensure APIs are enabled in Google Cloud Console
-
-### Memory Not Working
-- Vector store loads on first run (may take 10-15s)
-- Check sufficient disk space for embeddings
-- Verify write permissions in `data/` directory
-
-## Development
-
-### Adding New Tools
-1. Create tool in `tools/`
-2. Implement `execute(action, parameters)` method
-3. Register in `controller.py::__init__()`
-4. Add domain/actions to `ALLOWED_DOMAINS` and `ALLOWED_ACTIONS`
-
-### Adding New Actions
-1. Add action to `ALLOWED_ACTIONS` in `controller.py`
-2. Implement in respective tool's `execute()` method
-3. Update LLM system prompt in `llm.py`
-
-## Security
-
-- ✅ Input sanitization (gibberish detection)
-- ✅ Domain whitelisting (only 6 approved domains)
-- ✅ Action contracts (no hallucinated actions)
-- ✅ Guardrails (daily mutation limits)
-- ✅ Telemetry (audit trail for all mutations)
-- ✅ No arbitrary code execution
-- ✅ No SQL injection (parameterized queries)
-
-## License
-
-MIT License - See LICENSE file
-
-## Support
-
-For issues, questions, or contributions:
-- GitHub Issues: https://github.com/sohamdhande/NOVA-/issues
-- Email: sohamdhande@example.com
-
-## Credits
-
-**Author:** Soham Dhande  
-**Version:** 4.0  
-**Release Date:** April 2026  
-**Status:** Production Ready
+- `nova ingest <source_type> <file_or_text>`: Parse raw input (types: `slack`, `git`, `plaintext`) and compile it into a KnowledgeCommit on disk.
+- `nova log`: Print the full chain of commits.
+- `nova show <commit_hash_prefix>`: Show the full KIR structural detail for a specific hash.
+- `nova ask <intent>`: Execute the Reasoning Compiler against the persistent timeline to answer queries based on accumulated knowledge.
+- `nova explain <fact_id>`: Query the provenance engine (currently informs you it is not persisted).
+- `nova reset`: Deletes the SQLite database with an interactive confirmation prompt.
 
 ---
 
-**Built with:** Python, Groq API, Tavily, Google Workspace APIs, Sentence Transformers, ChromaDB
+### End-to-End Tutorial (5 minutes)
+
+#### 1. Ingest Knowledge
+Provide plaintext inputs to compile into knowledge.
+```bash
+$ python3 nova/packages/cli/main.py ingest plaintext "Soham and Alice decided to build a deterministic compiler."
+Successfully committed: 5ea751d9e2a8...
+
+$ python3 nova/packages/cli/main.py ingest plaintext "The compiler must be query-driven, not stage-driven."
+Successfully committed: b258ff093b12...
+```
+
+#### 2. View the Log
+Query the timeline to ensure both facts chained correctly.
+```bash
+$ python3 nova/packages/cli/main.py log
+commit 5ea751d9 - 2026-06-26 12:00:00 - GENERIC:OBSERVE 'Soham and Alice decided to build a de...'
+commit b258ff09 - 2026-06-26 12:00:15 - GENERIC:OBSERVE 'The compiler must be query-driven, no...'
+```
+
+#### 3. Ask NOVA a Question
+Use the `ask` feature to engage the Reasoning Compiler on top of the persisted dataset.
+```bash
+$ python3 nova/packages/cli/main.py ask "What was decided about the compiler?"
+NOTE: IdentityRegistry, TemporalIndex, and DependencyGraph are currently session-only.
+      This reasoning pass evaluates directly off raw SQLite commits.
+
+Compiled Context:
+- Fact obs_123 [ARTIFACT]: ... "Soham and Alice decided to build a deterministic compiler."
+- Fact obs_456 [ARTIFACT]: ... "The compiler must be query-driven, not stage-driven."
+```
+
+#### 4. Show Commit Details
+Inspect the exact deterministic KIR output generated for the specific commit.
+```bash
+$ python3 nova/packages/cli/main.py show 5ea751d9
+Commit: 5ea751d9e2a8...
+Parent: None
+Date:   2026-06-26 12:00:00+00:00
+----------------------------------------
+KIRNode (GENERIC - OBSERVE)
+  ID: out_123
+  Inputs: []
+  Metadata: {
+    "content": "Soham and Alice decided to build a deterministic compiler."
+  }
+```
+
+#### 5. Reset the Chain
+If you want to clear your timeline, reset the database.
+```bash
+$ python3 nova/packages/cli/main.py reset
+Are you sure you want to delete /Users/name/.nova/knowledge.db? (y/N): y
+Database deleted.
+```

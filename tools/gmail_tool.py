@@ -7,6 +7,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from llm import _chat
+from core.personality import get_system_prefix
+
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify"
@@ -151,11 +154,6 @@ class GmailTool:
         ])
 
         try:
-            import sys
-            sys.path.append(BASE_DIR)
-            from llm import _chat
-            from core.personality import get_system_prefix
-            
             system_prompt = get_system_prefix() + "\n\nSummarize these emails as a clean inbox briefing. List sender, subject, and one line summary for each. Flag anything urgent. Be concise."
             
             summary = _chat(

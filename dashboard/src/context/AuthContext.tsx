@@ -24,12 +24,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     const login = useCallback((newToken: string, expiresIn: number) => {
+        localStorage.setItem("nova_token", newToken);
         setToken(newToken);
         setExpiresAt(new Date(Date.now() + expiresIn * 1000));
         setIsAuthenticated(true);
     }, []);
 
     const logout = useCallback(() => {
+        localStorage.removeItem("nova_token");
         setToken(null);
         setExpiresAt(null);
         setIsAuthenticated(false);
